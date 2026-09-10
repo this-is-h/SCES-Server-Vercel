@@ -14,7 +14,7 @@
 
 ## 提交规范（commit-msg 强制）
 格式 `<type>(<scope>): <subject>`；type ∈ feat/fix/docs/style/refactor/perf/test/chore/build/ci/revert；
-scope 小写（web/schema/openapi/docs/build/ci/deps）；
+scope 小写（web/api/contracts/db/admin/schema/openapi/docs/build/ci/deps）；
 subject ≤50 字符、小写、祈使句、句尾无句号；header ≤72。
 
 ## 钩子与 CI 门禁

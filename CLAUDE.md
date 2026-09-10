@@ -11,7 +11,7 @@
 - `feature/*`/`bugfix/*`/`chore/*`（从 develop 创建，合并回 develop）；`hotfix/*`（从 main 创建）
 
 ### 提交规范
-格式：`<type>(<scope>): <subject>`；type ∈ feat/fix/docs/style/refactor/perf/test/chore/build/ci/revert；scope 可选小写（web/schema/openapi/docs/build/ci/deps）；subject ≤50 字符、小写祈使句、无句号。
+格式：`<type>(<scope>): <subject>`；type ∈ feat/fix/docs/style/refactor/perf/test/chore/build/ci/revert；scope 可选小写（web/api/contracts/db/admin/schema/openapi/docs/build/ci/deps）；subject ≤50 字符、小写祈使句、无句号。
 
 ### 红线
 - 接口唯一权威 = SCES-Server `contracts/`（OpenAPI 3.1 + unit-config.schema.json）；本仓不重定义接口，契约改动先走 SCES-Server 的 `build` + `verify`。
