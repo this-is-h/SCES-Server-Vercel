@@ -1,0 +1,437 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dys-management-system.local/schemas/unit-config.schema.json",
+  "title": "UnitConfig",
+  "description": "单位配置（一个二级单位一份）：单位信息 + 班级级联 + 学生字段 + 德育分项目（标记内嵌） + 计算规则 + 排名规则。服务端 contracts/seed/ 下的种子为唯一权威（决策 #38）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "revision",
+    "status",
+    "unit",
+    "class",
+    "student",
+    "dyf",
+    "calc",
+    "rank"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "本 schema 的版本号，当前固定为 1。",
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "description": "配置模板 id（kebab-case，全局唯一）。",
+      "$ref": "#/$defs/kebabId"
+    },
+    "name": {
+      "description": "配置模板名称（面向人的显示名）。",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "业务版本号，从 1 起递增。",
+      "type": "integer",
+      "minimum": 1
+    },
+    "revision": {
+      "description": "修订号，同一 version 内从 0 起递增。",
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "description": "发布状态：draft 可编辑 / published 不可编辑且可被批次引用 / archived 仅归档不可再引用。",
+      "enum": ["draft", "published", "archived"]
+    },
+    "unit": { "$ref": "#/$defs/unitBinding" },
+    "class": { "$ref": "#/$defs/classCascader" },
+    "student": {
+      "description": "学生基本信息字段（学生端表单项），顺序即渲染顺序。",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/studentField" }
+    },
+    "dyf": { "$ref": "#/$defs/dyf" },
+    "calc": { "$ref": "#/$defs/calc" },
+    "rank": { "$ref": "#/$defs/rank" },
+    "updatedAt": {
+      "description": "最后更新时间（epoch ms）。仅服务端下发配置时附带；种子文件不含此字段。",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "kebabId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "unitId": {
+      "description": "单位 id（camelCase，与学生端单位树 value 一致，如 nxuLx / testTest1）。",
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9]*$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "unitBinding": {
+      "description": "配置绑定的二级单位（决策 #34：二级单位为唯一批次主体，一级单位仅作展示分组）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unitId", "name", "unitType", "parentUnit"],
+      "properties": {
+        "unitId": { "$ref": "#/$defs/unitId" },
+        "name": { "type": "string", "minLength": 1 },
+        "unitType": {
+          "description": "二级单位类型：college 书院/学院 / department 系部 / other 其他。",
+          "enum": ["college", "department", "other"]
+        },
+        "parentUnit": {
+          "description": "一级单位（学校）。",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unitId", "name"],
+          "properties": {
+            "unitId": { "$ref": "#/$defs/unitId" },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "classCascader": {
+      "description": "班级级联选择器（学院 → 专业 → 班级），层级数由 titles 长度决定。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["titles", "options"],
+      "properties": {
+        "titles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/cascaderNode" }
+        }
+      }
+    },
+    "cascaderNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "value"],
+      "properties": {
+        "text": {
+          "description": "显示文本（当层内唯一）。",
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "description": "取值（叶子节点的 value 即班级全名，需全局唯一）。",
+          "type": "string",
+          "minLength": 1
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/cascaderNode" }
+        }
+      }
+    },
+    "studentField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "label", "required", "type"],
+      "properties": {
+        "code": {
+          "description": "字段 code（camelCase，与 shared Student 类型字段对应）。",
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*$"
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "type": {
+          "description": "输入类型：text 文本 / number 数字。",
+          "enum": ["text", "number"]
+        },
+        "pattern": {
+          "description": "校验正则（ECMAScript 语法，字符串形式）。",
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "description": "校验失败提示文案。",
+          "type": "string",
+          "minLength": 1
+        },
+        "fromClass": {
+          "description": "true 表示该字段由班级级联选择自动填充，学生端不可直接编辑。",
+          "type": "boolean"
+        }
+      }
+    },
+    "dyf": {
+      "description": "德育分项目树：分类 → 组 → 条目。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categories"],
+      "properties": {
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/dyfCategory" }
+        }
+      }
+    },
+    "dyfCategory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "name",
+        "studentRequired",
+        "adminRequired",
+        "penalty",
+        "groups"
+      ],
+      "properties": {
+        "code": { "$ref": "#/$defs/kebabId" },
+        "name": { "type": "string", "minLength": 1 },
+        "studentRequired": {
+          "description": "该分类下条目学生端必填（原 config.studentRequiredCategories）。",
+          "type": "boolean"
+        },
+        "adminRequired": {
+          "description": "该分类下条目管理端必填（原 config.adminRequiredCategories）。",
+          "type": "boolean"
+        },
+        "penalty": {
+          "description": "该分类计为惩罚分，总分按负向累加（原 config.totalScorePenaltyCategoryCodes，决策 #36）。",
+          "type": "boolean"
+        },
+        "takeHighest": { "$ref": "#/$defs/takeHighest" },
+        "groups": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/dyfGroup" }
+        }
+      }
+    },
+    "dyfGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name", "items"],
+      "properties": {
+        "code": { "$ref": "#/$defs/kebabId" },
+        "name": { "type": "string", "minLength": 1 },
+        "takeHighest": { "$ref": "#/$defs/takeHighest" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/dyfItem" }
+        }
+      }
+    },
+    "takeHighest": {
+      "description": "同一取分族内只计最高分。",
+      "oneOf": [
+        { "const": false },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope"],
+          "properties": {
+            "scope": { "enum": ["category", "group", "prefix"] },
+            "prefixLength": { "type": "integer", "minimum": 1, "maximum": 32 }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "scope": { "const": "prefix" } } },
+              "then": {
+                "properties": { "prefixLength": { "type": "integer", "minimum": 1, "maximum": 32 } },
+                "required": ["prefixLength"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "dyfItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "description",
+        "scoreType",
+        "support",
+        "studentApplicable",
+        "studentRequired",
+        "adminEditable",
+        "adminRequired",
+        "allowAdd",
+        "negative"
+      ],
+      "properties": {
+        "code": {
+          "description": "条目编号（数字串，单位内唯一；沿用德育分办法编号，如 111 / 8882）。",
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "description": { "type": "string", "minLength": 1 },
+        "scoreType": { "$ref": "#/$defs/scoreType" },
+        "support": { "$ref": "#/$defs/support" },
+        "studentApplicable": {
+          "description": "学生端可申请（可见并可填）。",
+          "type": "boolean"
+        },
+        "studentRequired": {
+          "description": "学生端必填条目（原 config.studentRequiredExtraItemNumbers）。",
+          "type": "boolean"
+        },
+        "adminEditable": {
+          "description": "管理端可修改该条目分数。",
+          "type": "boolean"
+        },
+        "adminRequired": {
+          "description": "管理端必填条目（原 config.adminRequiredExtraItemNumbers）。",
+          "type": "boolean"
+        },
+        "allowAdd": {
+          "description": "允许学生端多次累加（同一条目多条业绩累积）。",
+          "type": "boolean"
+        },
+        "negative": {
+          "description": "该条目单项取负计入总分（原 config.totalScoreNegativeItemNumbers，决策 #36）。",
+          "type": "boolean"
+        }
+      }
+    },
+    "scoreType": {
+      "description": "计分方式，仅 stepper / radio / input 三种（决策 #35）。",
+      "oneOf": [
+        { "$ref": "#/$defs/scoreTypeStepper" },
+        { "$ref": "#/$defs/scoreTypeRadio" },
+        { "$ref": "#/$defs/scoreTypeInput" }
+      ]
+    },
+    "scoreTypeStepper": {
+      "description": "步进器：max 缺省表示无上限。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "min", "step"],
+      "properties": {
+        "type": { "const": "stepper" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0 },
+        "decimals": { "type": "integer", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "scoreTypeRadio": {
+      "description": "单选：固定候选分值。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "options"],
+      "properties": {
+        "type": { "const": "radio" },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "label"],
+            "properties": {
+              "value": { "type": "number" },
+              "label": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "scoreTypeInput": {
+      "description": "手动输入：min / max 均可缺省。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "input" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "decimals": { "type": "integer", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "support": {
+      "description": "证明材料要求：need 为 true 时必须给出 message 提示文案。",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["need"],
+          "properties": { "need": { "const": false } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["need", "message"],
+          "properties": {
+            "need": { "const": true },
+            "message": {
+              "description": "材料提示文案。",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "calc": {
+      "description": "综测成绩计算规则（shared calc 引擎消费）：formula 模式必须给出表达式。",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["calcMode", "dyfWeight", "courseWeight"],
+          "properties": {
+            "calcMode": { "const": "weighted" },
+            "dyfWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+            "courseWeight": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["calcMode", "dyfWeight", "courseWeight", "formula"],
+          "properties": {
+            "calcMode": { "const": "formula" },
+            "dyfWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+            "courseWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+            "formula": {
+              "description": "自定义计算表达式。",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "rank": {
+      "description": "排名规则（决策 #21：scopes 已取消，仅保留并列规则）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tieRule"],
+      "properties": {
+        "tieRule": {
+          "description": "并列规则：same-rank 同分同名次（下一名次跳号）/ dense 同分同名次（名次不跳号）。",
+          "enum": ["same-rank", "dense"]
+        }
+      }
+    }
+  }
+}

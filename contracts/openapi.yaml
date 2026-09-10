@@ -1,0 +1,2209 @@
+openapi: 3.1.0
+
+info:
+  title: 学生综合素质测评管理系统 · 服务端 API
+  version: 1.0.0
+  summary: 服务端对外接口的唯一权威契约
+  description: |
+    本文件是服务端接口的**唯一权威契约**（决策 §1.3 契约形式）。
+    `server/web`（Fastify + PostgreSQL）与 `server/cloudflare`（Workers + D1）
+    两套实现必须逐字段对齐本契约，一致性由 `contract-tests/` 的同一断言集保证。
+
+    ## 通用约定
+
+    - 路径版本化：`/api/v1/*`。
+    - 响应统一包裹：成功 `{ "ok": true, "data": ... }`，失败 `{ "ok": false, "error": "中文描述" }`。
+    - 错误文案一律为**简体中文**（管理端 `server-client.ts` 直接透传给用户）。
+    - 时间戳统一为 epoch 毫秒整数。
+    - 服务端**不存储**分数明细、证明材料与任何私钥（数据主权原则）。
+
+    ## 鉴权
+
+    | 角色 | 方式 | 说明 |
+    |------|------|------|
+    | 管理端写接口 | `Authorization: Bearer <unitToken>` | 激活时下发，绑定 unitId + installId，随授权码作废/换机失效（决策 #29） |
+    | 管理端标识头 | `X-Unit-Id` / `X-Install-Id` | 辅助标识与审计，**不作为信任凭证** |
+    | 学生端 | 路径中的 `applyId` | 122 bit 随机 UUID，服务端只存 SHA-256 哈希 + 严格限流（决策 #40） |
+    | 管理后台 | `Authorization: Bearer <accessToken>` | 15 分钟短期 token，配可删除的刷新 token（决策 #40） |
+
+    ## 状态机
+
+    - 批次：`draft → active → closed`，单向推进。
+    - 申请：单轮内 `draft → submitted → imported → reviewing → confirmed`，**不允许回退**；
+      整班重审由一级发起新一轮（`review_round + 1`，从 `reviewing` 开始，决策 #30/#31）。
+  contact:
+    name: 项目文档
+    url: https://github.com/local/dys-management-system/blob/main/docs/server-plan.md
+
+servers:
+  - url: http://127.0.0.1:3100
+    description: 本地开发（server/web）
+  - url: http://127.0.0.1:8787
+    description: 本地开发（server/cloudflare，wrangler dev）
+  - url: https://{host}
+    description: 生产部署
+    variables:
+      host:
+        default: dms.example.com
+        description: 部署域名（管理端编译期注入 __DMS_SERVER_URL__）
+
+tags:
+  - name: 健康检查
+    description: 运维探活
+  - name: 授权
+    description: 管理端激活、公钥上报、换机、授权状态
+  - name: 批次
+    description: 批次登记、状态同步、活跃批次下发
+  - name: 申请状态
+    description: 申请状态同步、学生端注册与查询、新一轮审核
+  - name: 公开信息
+    description: 学生端无鉴权可读的公开数据
+  - name: 后台认证
+    description: 管理后台登录与会话
+  - name: 后台单位与授权
+    description: 单位层级、授权码签发/作废/续期、换机审批
+  - name: 后台配置模板
+    description: 配置模板上传、版本历史、发布
+  - name: 后台运维
+    description: 批次查看、审计日志
+
+security:
+  - unitToken: []
+
+components:
+  securitySchemes:
+    unitToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: 单位令牌，激活时由 `POST /api/v1/authorize` 下发（决策 #29）。
+    adminToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 管理后台访问令牌，有效期 15 分钟（决策 #40）。
+
+  parameters:
+    unitIdHeader:
+      name: X-Unit-Id
+      in: header
+      required: true
+      description: 当前激活的二级单位 id（辅助标识与审计）。
+      schema: { $ref: '#/components/schemas/UnitId' }
+    installIdHeader:
+      name: X-Install-Id
+      in: header
+      required: true
+      description: 管理端安装实例 id（换机识别与审计）。
+      schema: { type: string, minLength: 1, maxLength: 64 }
+    applyIdPath:
+      name: applyId
+      in: path
+      required: true
+      description: 申请 id（UUID v4，学生端生成）。
+      schema: { $ref: '#/components/schemas/ApplyId' }
+    batchIdPath:
+      name: batchId
+      in: path
+      required: true
+      description: 批次 id（UUID v4，管理端生成）。
+      schema: { $ref: '#/components/schemas/BatchId' }
+    unitIdPath:
+      name: unitId
+      in: path
+      required: true
+      description: 单位 id。
+      schema: { $ref: '#/components/schemas/UnitId' }
+    licenseCodePath:
+      name: code
+      in: path
+      required: true
+      description: 授权码。
+      schema: { $ref: '#/components/schemas/LicenseCode' }
+    templateIdPath:
+      name: templateId
+      in: path
+      required: true
+      description: 配置模板 id。
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$' }
+
+  schemas:
+    EpochMs:
+      description: epoch 毫秒时间戳。
+      type: integer
+      minimum: 0
+      examples: [1755500000000]
+
+    UnitId:
+      description: 单位 id（camelCase，与学生端单位树 value 一致）。
+      type: string
+      pattern: '^[a-zA-Z][a-zA-Z0-9]*$'
+      maxLength: 64
+      examples: ['nxuLx']
+
+    ApplyId:
+      description: 申请 id（UUID v4）。服务端只存 SHA-256 哈希（决策 #40）。
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      examples: ['3f2a6c58-7b41-4d2e-9c05-8ab1f0e6d731']
+
+    BatchId:
+      description: 批次 id（UUID v4）。
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      examples: ['b1c9d4e2-5a37-4f18-9d6b-2e7c8a4f1b03']
+
+    LicenseCode:
+      description: 授权码（大写字母数字分组）。
+      type: string
+      pattern: '^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$'
+      examples: ['A1B2-C3D4-E5F6-G7H8']
+
+    Jwk:
+      description: 公钥 JWK（RSA-OAEP-256）。私钥永不进入服务端。
+      type: object
+      required: [kty, n, e]
+      properties:
+        kty: { type: string, examples: ['RSA'] }
+        n: { type: string }
+        e: { type: string, examples: ['AQAB'] }
+        alg: { type: string, examples: ['RSA-OAEP-256'] }
+        ext: { type: boolean }
+        key_ops:
+          type: array
+          items: { type: string }
+      additionalProperties: true
+
+    BatchStatus:
+      description: 批次状态（单向推进）。
+      enum: [draft, active, closed]
+
+    ApplyStatus:
+      description: 申请状态（单轮内单向推进）。
+      enum: [draft, submitted, imported, reviewing, confirmed]
+
+    ReviewRound:
+      description: 审核轮次，从 1 起递增（决策 #31）。
+      type: integer
+      minimum: 1
+      examples: [1]
+
+    Revision:
+      description: 申请版本号，学生端每次导出 +1。
+      type: integer
+      minimum: 1
+      examples: [3]
+
+    UnitConfig:
+      description: |
+        单位配置（一个二级单位一份，含单位/班级/学生字段/德育分项目/计算/排名）。
+        结构由 `unit-config.schema.json` 单独定义，两套实现与两端共用同一份 schema。
+      $ref: './unit-config.schema.json'
+
+    UnitSummary:
+      description: 单位摘要（激活响应与后台列表共用）。
+      type: object
+      required: [unitId, unitName, unitType]
+      properties:
+        unitId: { $ref: '#/components/schemas/UnitId' }
+        unitName: { type: string, examples: ['励行书院'] }
+        unitType:
+          enum: [college, department, other]
+          examples: ['college']
+        level:
+          description: 单位层级：1 一级（学校）/ 2 二级（书院）。
+          enum: [1, 2]
+        parentUnitId:
+          description: 一级单位 id（二级单位必有）。
+          oneOf:
+            - { $ref: '#/components/schemas/UnitId' }
+            - { type: 'null' }
+      additionalProperties: false
+
+    LicenseStatus:
+      description: 授权状态。
+      enum: [active, expired, revoked]
+
+    LicenseInfo:
+      type: object
+      required: [expiresAt, status]
+      properties:
+        expiresAt: { $ref: '#/components/schemas/EpochMs' }
+        status: { $ref: '#/components/schemas/LicenseStatus' }
+      additionalProperties: false
+
+    CalcConfig:
+      description: |
+        计算配置（批次快照，与配置模板 calc 同构）。判别字段 `calcMode`：
+        weighted 仅权重；formula 额外必填 `formula`。与
+        `unit-config.schema.json#/$defs/calc` 校验强度一致（决策 #35）。
+      oneOf:
+        - type: object
+          required: [calcMode, dyfWeight, courseWeight]
+          properties:
+            calcMode: { const: weighted, examples: ['weighted'] }
+            dyfWeight: { type: number, minimum: 0, maximum: 1, examples: [0.3] }
+            courseWeight: { type: number, minimum: 0, maximum: 1, examples: [0.7] }
+          additionalProperties: false
+        - type: object
+          required: [calcMode, dyfWeight, courseWeight, formula]
+          properties:
+            calcMode: { const: formula }
+            dyfWeight: { type: number, minimum: 0, maximum: 1 }
+            courseWeight: { type: number, minimum: 0, maximum: 1 }
+            formula: { type: string, minLength: 1 }
+          additionalProperties: false
+
+    BatchPublic:
+      description: 批次公开字段（不含私钥，决策 §3.2）。
+      type: object
+      required:
+        [batchId, unitId, year, semester, isTest, status, calcMode, calcConfig, publicKeyJwk]
+      properties:
+        batchId: { $ref: '#/components/schemas/BatchId' }
+        unitId: { $ref: '#/components/schemas/UnitId' }
+        year: { type: integer, minimum: 2000, maximum: 2999, examples: [2025] }
+        semester: { enum: [1, 2], examples: [2] }
+        isTest:
+          description: 是否测试批次（与正式批次并存，正式优先下发）。
+          type: boolean
+        status: { $ref: '#/components/schemas/BatchStatus' }
+        applyStartAt:
+          oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+        applyEndAt:
+          oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+        calcMode:
+          enum: [weighted, formula]
+        calcConfig: { $ref: '#/components/schemas/CalcConfig' }
+        publicKeyJwk: { $ref: '#/components/schemas/Jwk' }
+        configTemplateId: { type: string }
+        configTemplateVersion: { type: integer, minimum: 1 }
+        configTemplateRevision: { type: integer, minimum: 0 }
+        createdAt: { $ref: '#/components/schemas/EpochMs' }
+        updatedAt: { $ref: '#/components/schemas/EpochMs' }
+      additionalProperties: false
+
+    ApplyStatusRecord:
+      description: 申请状态记录（数据最小化：无学号、无姓名、无分数）。
+      type: object
+      required: [applyId, reviewRound, status, updatedAt]
+      properties:
+        applyId: { $ref: '#/components/schemas/ApplyId' }
+        reviewRound: { $ref: '#/components/schemas/ReviewRound' }
+        status: { $ref: '#/components/schemas/ApplyStatus' }
+        latestRevision:
+          description: 学生端注册的最新版本号（决策 #39）。
+          oneOf: [{ $ref: '#/components/schemas/Revision' }, { type: 'null' }]
+        importedRevision:
+          description: 管理端导入时上报的版本号（决策 #39）。
+          oneOf: [{ $ref: '#/components/schemas/Revision' }, { type: 'null' }]
+        importedAt:
+          oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+        updatedAt: { $ref: '#/components/schemas/EpochMs' }
+      additionalProperties: false
+
+    UnitTreeNode:
+      description: 公开单位树节点（学生端单位选择）。
+      type: object
+      required: [text, value]
+      properties:
+        text: { type: string, examples: ['宁夏大学'] }
+        value: { $ref: '#/components/schemas/UnitId' }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/UnitTreeNode' }
+      additionalProperties: false
+
+    RebindRequest:
+      description: 换机记录（自助换机 + 月限 3 次，决策 #40）。
+      type: object
+      required: [id, unitId, installId, status, createdAt]
+      properties:
+        id: { type: string }
+        unitId: { $ref: '#/components/schemas/UnitId' }
+        installId: { type: string }
+        reason:
+          oneOf: [{ type: string }, { type: 'null' }]
+        oldCode:
+          oneOf: [{ $ref: '#/components/schemas/LicenseCode' }, { type: 'null' }]
+        newCode:
+          oneOf: [{ $ref: '#/components/schemas/LicenseCode' }, { type: 'null' }]
+        status:
+          description: self-served 自助完成 / pending 超频待放行 / approved 已放行 / rejected 已拒绝。
+          enum: [self-served, pending, approved, rejected]
+        monthKey:
+          description: 频次计数月份（YYYY-MM）。
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+        monthCount: { type: integer, minimum: 0 }
+        createdAt: { $ref: '#/components/schemas/EpochMs' }
+      additionalProperties: false
+
+    TemplateVersion:
+      description: 配置模板版本行（按 (id, version, revision) 保留历史，决策 #37）。
+      type: object
+      required: [id, unitId, name, version, revision, status, updatedAt]
+      properties:
+        id: { type: string }
+        unitId: { $ref: '#/components/schemas/UnitId' }
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+        revision: { type: integer, minimum: 0 }
+        status:
+          enum: [draft, published, archived]
+        createdAt: { $ref: '#/components/schemas/EpochMs' }
+        updatedAt: { $ref: '#/components/schemas/EpochMs' }
+      additionalProperties: false
+
+    AuditLog:
+      type: object
+      required: [id, action, target, createdAt]
+      properties:
+        id: { type: integer }
+        adminUserId:
+          oneOf: [{ type: string }, { type: 'null' }]
+        action:
+          description: 操作类型（kebab-case，如 license-revoke / unit-create）。
+          type: string
+        target:
+          description: 操作对象标识（单位 id / 授权码 / 模板 id 等）。
+          type: string
+        detail:
+          oneOf: [{ type: string }, { type: 'null' }]
+        ip:
+          oneOf: [{ type: string }, { type: 'null' }]
+        createdAt: { $ref: '#/components/schemas/EpochMs' }
+      additionalProperties: false
+
+    ErrorBody:
+      description: 统一失败响应。
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { const: false }
+        error:
+          description: 面向用户的中文错误描述（管理端直接透传）。
+          type: string
+          minLength: 1
+      additionalProperties: false
+
+  responses:
+    BadRequest:
+      description: 参数错误
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            default:
+              value: { ok: false, error: '请求参数不合法' }
+    Unauthorized:
+      description: 未认证（缺少或无效令牌）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            default:
+              value: { ok: false, error: '未登录或登录已过期' }
+    Forbidden:
+      description: 无权限 / 已失效 / 已过期 / 已截止
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            expired:
+              summary: 授权已过期
+              value: { ok: false, error: '授权已过期，请联系服务商续期' }
+            deadline:
+              summary: 申请已截止
+              value: { ok: false, error: '申请已截止' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            default:
+              value: { ok: false, error: '资源不存在' }
+    Conflict:
+      description: 状态冲突（回退、重复注册、批次重复等）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            rollback:
+              summary: 状态回退被拒
+              value: { ok: false, error: '申请状态不允许回退' }
+    TooManyRequests:
+      description: 限流（平台差异，不做契约测试断言，决策 §7.4）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            default:
+              value: { ok: false, error: '操作过于频繁，请稍后再试' }
+    ServerError:
+      description: 服务端异常
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            default:
+              value: { ok: false, error: '服务端异常，请稍后重试' }
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [健康检查]
+      summary: 探活
+      description: 运维探活接口，不计入 21 个业务接口。返回服务标识与当前时间。
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [status, now, architecture]
+                    properties:
+                      status: { const: ok }
+                      now: { $ref: '#/components/schemas/EpochMs' }
+                      architecture:
+                        description: 当前实现架构标识。
+                        enum: [web, cloudflare]
+                    additionalProperties: false
+                additionalProperties: false
+              examples:
+                default:
+                  value:
+                    ok: true
+                    data: { status: ok, now: 1755500000000, architecture: web }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # ------------------------------------------------------------------ 1. 授权
+
+  /api/v1/authorize:
+    post:
+      tags: [授权]
+      summary: 授权码核验（接口 1）
+      description: |
+        管理端激活入口。核验授权码，成功后下发：
+        - `unitToken`：写接口的 Bearer 凭证，绑定 unitId + installId（决策 #29）
+        - `license`：有效期与状态，与客户端本地激活信息对应
+        - `configTemplate`：该二级单位的完整配置（§4.2 结构）
+
+        同一授权码重复激活同一 `installId` 时幂等返回新 token；
+        换到新 `installId` 须走 `POST /api/v1/units/rebind`。
+      operationId: authorize
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { $ref: '#/components/schemas/LicenseCode' }
+              additionalProperties: false
+            examples:
+              default:
+                value: { code: 'A1B2-C3D4-E5F6-G7H8' }
+      responses:
+        '200':
+          description: 激活成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [unit, unitToken, license, configTemplate]
+                    properties:
+                      unit: { $ref: '#/components/schemas/UnitSummary' }
+                      unitToken:
+                        description: 单位令牌明文，仅此一次返回；服务端只存哈希。
+                        type: string
+                        minLength: 32
+                      license: { $ref: '#/components/schemas/LicenseInfo' }
+                      configTemplate: { $ref: '#/components/schemas/UnitConfig' }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: 授权码无效 / 已作废 / 已过期
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                invalid:
+                  value: { ok: false, error: '授权码无效' }
+                revoked:
+                  value: { ok: false, error: '授权码已作废' }
+                expired:
+                  value: { ok: false, error: '授权已过期，请联系服务商续期' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/units/{unitId}/public-key:
+    post:
+      tags: [授权]
+      summary: 单位公钥上报（接口 2）
+      description: |
+        管理端激活/换机后上报本单位公钥（RSA-OAEP-256 JWK）。
+        私钥永不上报（§3.2 红线）。重复上报同一公钥幂等；上报不同公钥覆盖旧值并落审计。
+      operationId: uploadUnitPublicKey
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdPath'
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [publicKeyJwk]
+              properties:
+                publicKeyJwk: { $ref: '#/components/schemas/Jwk' }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 上报成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [ok]
+                    properties:
+                      ok: { const: true }
+                    additionalProperties: false
+                additionalProperties: false
+              examples:
+                default:
+                  value: { ok: true, data: { ok: true } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 令牌与路径单位不匹配，或授权已失效
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                mismatch:
+                  value: { ok: false, error: '授权校验未通过，请重新激活' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/units/rebind:
+    post:
+      tags: [授权]
+      summary: 更换授权设备（接口 3）
+      description: |
+        自助换机（决策 #40）：服务端当场作废旧授权码、签发新码并返回，管理端随后注销本机。
+        每单位每月上限 3 次；超频返回 403 并生成 `pending` 换机记录，需后台手动放行。
+      operationId: rebindUnit
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  description: 换机原因（审计用）。
+                  type: string
+                  maxLength: 200
+              additionalProperties: false
+            examples:
+              default:
+                value: { reason: '原设备损坏' }
+      responses:
+        '200':
+          description: 换机成功，返回新授权码
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [ok, code, expiresAt, monthCount]
+                    properties:
+                      ok: { const: true }
+                      code:
+                        allOf:
+                          - $ref: '#/components/schemas/LicenseCode'
+                        description: 新签发的授权码。
+                      expiresAt: { $ref: '#/components/schemas/EpochMs' }
+                      monthCount:
+                        description: 本月已用换机次数（含本次）。
+                        type: integer
+                        minimum: 1
+                        maximum: 3
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 授权已失效，或本月换机次数超限
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                rateLimited:
+                  summary: 超出月限
+                  value: { ok: false, error: '本月更换设备次数已达上限，请联系服务商' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/license/status:
+    get:
+      tags: [授权]
+      summary: 授权状态拉取（接口 4）
+      description: 管理端定期拉取当前授权有效期与状态，用于过期提醒与续期后刷新（决策 #40）。
+      operationId: getLicenseStatus
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      responses:
+        '200':
+          description: 当前授权状态
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [code, expiresAt, status, unit]
+                    properties:
+                      code: { $ref: '#/components/schemas/LicenseCode' }
+                      expiresAt: { $ref: '#/components/schemas/EpochMs' }
+                      status: { $ref: '#/components/schemas/LicenseStatus' }
+                      unit: { $ref: '#/components/schemas/UnitSummary' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # ------------------------------------------------------------------ 2. 批次
+
+  /api/v1/batches:
+    post:
+      tags: [批次]
+      summary: 批次创建上报（接口 5）
+      description: |
+        管理端创建批次后上报公开字段（不含私钥）。同 `batchId` 重复上报幂等返回现有记录。
+        正式批次（`isTest: false`）在同一单位的同一 `(year, semester)` 唯一，重复创建返回 409。
+        配置模板以 (id, version, revision) 三元组快照引用（决策 #37）。
+      operationId: createBatch
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batch]
+              properties:
+                batch:
+                  type: object
+                  required:
+                    [
+                      batchId,
+                      year,
+                      semester,
+                      isTest,
+                      calcMode,
+                      calcConfig,
+                      publicKeyJwk,
+                      configTemplateId,
+                      configTemplateVersion,
+                      configTemplateRevision,
+                    ]
+                  properties:
+                    batchId: { $ref: '#/components/schemas/BatchId' }
+                    year: { type: integer, minimum: 2000, maximum: 2999 }
+                    semester: { enum: [1, 2] }
+                    isTest: { type: boolean }
+                    applyStartAt:
+                      oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+                    applyEndAt:
+                      oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+                    calcMode: { enum: [weighted, formula] }
+                    calcConfig: { $ref: '#/components/schemas/CalcConfig' }
+                    publicKeyJwk: { $ref: '#/components/schemas/Jwk' }
+                    configTemplateId: { type: string }
+                    configTemplateVersion: { type: integer, minimum: 1 }
+                    configTemplateRevision: { type: integer, minimum: 0 }
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        '200':
+          description: 登记成功（或幂等返回现有批次）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [batchId, status, createdAt]
+                    properties:
+                      batchId: { $ref: '#/components/schemas/BatchId' }
+                      status: { $ref: '#/components/schemas/BatchStatus' }
+                      createdAt: { $ref: '#/components/schemas/EpochMs' }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 同单位同学年学期已有正式批次
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                duplicate:
+                  value: { ok: false, error: '该学年学期已存在正式批次' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/batches/{batchId}/status:
+    post:
+      tags: [批次]
+      summary: 批次状态同步（接口 6）
+      description: |
+        管理端激活/关闭批次后同步状态（决策 #33）。`draft → active → closed` 单向推进；
+        同状态重复上报幂等返回 200，回退返回 409。
+        **本接口是学生端能拉到活跃批次的前提**。
+      operationId: updateBatchStatus
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/batchIdPath'
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/BatchStatus' }
+              additionalProperties: false
+            examples:
+              activate:
+                value: { status: active }
+      responses:
+        '200':
+          description: 状态已更新（或幂等）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [batchId, status, updatedAt]
+                    properties:
+                      batchId: { $ref: '#/components/schemas/BatchId' }
+                      status: { $ref: '#/components/schemas/BatchStatus' }
+                      updatedAt: { $ref: '#/components/schemas/EpochMs' }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 状态回退被拒
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                rollback:
+                  value: { ok: false, error: '批次状态不允许回退' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/batches/{batchId}/apply-statuses:
+    post:
+      tags: [申请状态]
+      summary: 批量申请状态上报（接口 7）
+      description: |
+        供整班导出（`confirmed`）与整班新一轮审核批量使用（决策 #32）。
+        逐条返回结果，整批不因个别失败而回滚，失败项由客户端重试。
+
+        两种语义由 `startNewRound` 区分：
+        - **省略或 false（同轮推进）**：单条语义与 `POST /api/v1/applies/{applyId}/status`
+          一致，单轮内单向推进，真正回退的条目返回 `ok:false`（不影响其余）。
+        - **true（跨轮开启新一轮）**：等价于对每个 `applyId` 调用接口 9，
+          `reviewRound = N + 1`、状态置 `reviewing`（决策 #30/#31，取代管理端 revokeBatchExport）。
+          此时 `status` 必须为 `reviewing`。仅单位主令牌（激活端 / 一级）可调用。
+
+        `applyIds` 单批上限 500；上千人整班需分片调用，各片幂等可重试。
+      operationId: bulkUpdateApplyStatuses
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/batchIdPath'
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, applyIds]
+              properties:
+                status:
+                  allOf:
+                    - $ref: '#/components/schemas/ApplyStatus'
+                  description: 目标状态，整批统一。startNewRound 为 true 时必须为 reviewing。
+                applyIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { $ref: '#/components/schemas/ApplyId' }
+                revision:
+                  description: 可选，整批统一的导入版本号（决策 #39）。
+                  $ref: '#/components/schemas/Revision'
+                startNewRound:
+                  description: |
+                    true 表示整班发起新一轮审核（reviewRound + 1，从 reviewing 开始）；
+                    省略或 false 为同轮单向推进。默认 false。
+                  type: boolean
+              additionalProperties: false
+      responses:
+        '200':
+          description: 逐条结果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [results, succeeded, failed]
+                    properties:
+                      succeeded: { type: integer, minimum: 0 }
+                      failed: { type: integer, minimum: 0 }
+                      results:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: '#/components/schemas/ApplyStatusRecord'
+                            - type: object
+                              required: [ok]
+                              properties:
+                                ok: { type: boolean }
+                                error:
+                                  description: 失败时的中文原因。
+                                  oneOf: [{ type: string }, { type: 'null' }]
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # -------------------------------------------------------------- 3. 申请状态
+
+  /api/v1/applies/{applyId}/status:
+    post:
+      tags: [申请状态]
+      summary: 申请状态上报（接口 8）
+      description: |
+        管理端导入/审核/确认后上报单条申请状态。单轮内单向推进；
+        **同状态重复上报幂等返回 200**（网络重试安全），真正回退返回 409。
+        `revision` 可选：管理端导入时上报 `importedRevision`，与学生端 `latestRevision` 比对（决策 #39）。
+      operationId: updateApplyStatus
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/applyIdPath'
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchId, status]
+              properties:
+                batchId: { $ref: '#/components/schemas/BatchId' }
+                status:
+                  allOf:
+                    - $ref: '#/components/schemas/ApplyStatus'
+                  description: 目标状态（管理端仅上报 imported / reviewing / confirmed）。
+                revision: { $ref: '#/components/schemas/Revision' }
+              additionalProperties: false
+            examples:
+              imported:
+                value:
+                  batchId: 'b1c9d4e2-5a37-4f18-9d6b-2e7c8a4f1b03'
+                  status: imported
+                  revision: 3
+      responses:
+        '200':
+          description: 状态已更新（或幂等）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data: { $ref: '#/components/schemas/ApplyStatusRecord' }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 状态回退被拒
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                rollback:
+                  value: { ok: false, error: '申请状态不允许回退' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/applies/{applyId}/review-rounds:
+    post:
+      tags: [申请状态]
+      summary: 发起新一轮审核（接口 9）
+      description: |
+        整班导出确认后不可撤销；有问题的班级由一级发起**新一轮审核**（决策 #30/#31）。
+        新一轮 `reviewRound = N + 1`，状态从 `reviewing` 开始（**不允许重新导入**），
+        确认后进入该轮 `confirmed`。仅一级单位令牌可调用；**整班发起走接口 7
+        批量（`startNewRound: true`）**，本接口用于单条发起。
+      operationId: startReviewRound
+      security:
+        - unitToken: []
+      parameters:
+        - $ref: '#/components/parameters/applyIdPath'
+        - $ref: '#/components/parameters/unitIdHeader'
+        - $ref: '#/components/parameters/installIdHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  description: 重审原因（审计用）。
+                  type: string
+                  maxLength: 200
+              additionalProperties: false
+      responses:
+        '200':
+          description: 新一轮已开启
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data: { $ref: '#/components/schemas/ApplyStatusRecord' }
+                additionalProperties: false
+              examples:
+                default:
+                  value:
+                    ok: true
+                    data:
+                      applyId: '3f2a6c58-7b41-4d2e-9c05-8ab1f0e6d731'
+                      reviewRound: 2
+                      status: reviewing
+                      latestRevision: 3
+                      importedRevision: 3
+                      importedAt: 1755500000000
+                      updatedAt: 1755600000000
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 非一级单位令牌，或授权已失效
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                notLevel1:
+                  value: { ok: false, error: '仅一级单位可发起新一轮审核' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 当前轮次尚未确认，无法开启新一轮
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                notConfirmed:
+                  value: { ok: false, error: '当前轮次尚未确认，无法发起新一轮审核' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # ---------------------------------------------------------- 4. 学生端与公开
+
+  /api/v1/units/public:
+    get:
+      tags: [公开信息]
+      summary: 公开单位树（接口 10）
+      description: |
+        学生端单位选择使用，无鉴权。只返回 `status = 'active'` 的单位，
+        一级单位作为分组节点，二级单位为叶子（决策 #34）。不含任何配置或授权信息。
+      operationId: getPublicUnits
+      security: []
+      responses:
+        '200':
+          description: 单位树
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [units]
+                    properties:
+                      units:
+                        type: array
+                        items: { $ref: '#/components/schemas/UnitTreeNode' }
+                    additionalProperties: false
+                additionalProperties: false
+              examples:
+                default:
+                  value:
+                    ok: true
+                    data:
+                      units:
+                        - text: 宁夏大学
+                          value: nxu
+                          children:
+                            - { text: 励行书院, value: nxuLx }
+                        - text: 测试学校
+                          value: test
+                          children:
+                            - { text: 测试1, value: testTest1 }
+                            - { text: 测试2, value: testTest2 }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/batches/active:
+    get:
+      tags: [批次]
+      summary: 活跃批次下发（接口 11）
+      description: |
+        学生端启动时按**二级单位**拉取当前活跃批次与完整配置（决策 #34）。
+        活跃批次 = `status = 'active'` 且（`applyEndAt` 为空或 `applyEndAt >= now`）。
+        同单位存在多个活跃批次时：**正式批次优先**，其次取 `createdAt` 最新。
+        无活跃批次时返回 `batch: null`（不是 404）。
+      operationId: getActiveBatch
+      security: []
+      parameters:
+        - name: unitId
+          in: query
+          required: true
+          description: 二级单位 id。
+          schema: { $ref: '#/components/schemas/UnitId' }
+      responses:
+        '200':
+          description: 活跃批次（可能为空）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [batch]
+                    properties:
+                      batch:
+                        oneOf:
+                          - { $ref: '#/components/schemas/BatchPublic' }
+                          - { type: 'null' }
+                      configTemplate:
+                        description: 批次快照对应的配置版本；`batch` 为 null 时省略。
+                        oneOf:
+                          - { $ref: '#/components/schemas/UnitConfig' }
+                          - { type: 'null' }
+                    additionalProperties: false
+                additionalProperties: false
+              examples:
+                none:
+                  summary: 无活跃批次
+                  value: { ok: true, data: { batch: null } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: 单位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                default:
+                  value: { ok: false, error: '单位不存在' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/applies/{applyId}/register:
+    post:
+      tags: [申请状态]
+      summary: 学生端注册申请（接口 12）
+      description: |
+        学生端导出 `.dyf` 时注册（决策 #39）。请求体只含 `batchId` 与 `revision`，
+        **不含任何个人信息**；服务端记录 `latestRevision` 并置状态 `submitted`（`reviewRound = 1`）。
+
+        服务端校验 `batch.status = 'active'` 且未过 `applyEndAt`（**服务端时间为准**，学生端仅前置提示）。
+        重复注册更高 `revision` 时更新；相同 `revision` 幂等；已 `imported` 后再注册返回 409。
+        走严格限流（决策 #40）。
+      operationId: registerApply
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/applyIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchId, revision]
+              properties:
+                batchId: { $ref: '#/components/schemas/BatchId' }
+                revision: { $ref: '#/components/schemas/Revision' }
+              additionalProperties: false
+            examples:
+              default:
+                value:
+                  batchId: 'b1c9d4e2-5a37-4f18-9d6b-2e7c8a4f1b03'
+                  revision: 1
+      responses:
+        '200':
+          description: 注册成功（或幂等）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data: { $ref: '#/components/schemas/ApplyStatusRecord' }
+                additionalProperties: false
+              examples:
+                default:
+                  value:
+                    ok: true
+                    data:
+                      applyId: '3f2a6c58-7b41-4d2e-9c05-8ab1f0e6d731'
+                      reviewRound: 1
+                      status: submitted
+                      latestRevision: 1
+                      importedRevision: null
+                      importedAt: null
+                      updatedAt: 1755500000000
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: 批次未开放或申请已截止
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                deadline:
+                  value: { ok: false, error: '申请已截止' }
+                inactive:
+                  value: { ok: false, error: '批次未开放申请' }
+        '404':
+          description: 批次不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                default:
+                  value: { ok: false, error: '批次不存在' }
+        '409':
+          description: 已被管理端导入，不可再注册新版本
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                imported:
+                  value: { ok: false, error: '该申请已被导入，不可再提交新版本' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/applies/{applyId}:
+    get:
+      tags: [申请状态]
+      summary: 申请状态查询（接口 13）
+      description: |
+        学生端查询本人申请状态。服务端以 `SHA-256(applyId)` 查询（决策 #40），
+        不返回任何个人信息与分数明细。未知 `applyId` 返回 `status: "unknown"`（200，非 404），
+        以避免通过状态码区分存在性。走严格限流。
+      operationId: getApplyStatus
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/applyIdPath'
+      responses:
+        '200':
+          description: 申请状态（含未知）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    oneOf:
+                      - $ref: '#/components/schemas/ApplyStatusRecord'
+                      - type: object
+                        required: [applyId, status, reviewRound]
+                        properties:
+                          applyId: { $ref: '#/components/schemas/ApplyId' }
+                          status: { const: unknown }
+                          reviewRound: { type: 'null' }
+                          latestRevision: { type: 'null' }
+                          importedRevision: { type: 'null' }
+                          importedAt: { type: 'null' }
+                          updatedAt: { type: 'null' }
+                        additionalProperties: false
+                additionalProperties: false
+              examples:
+                known:
+                  summary: 已导入待审核
+                  value:
+                    ok: true
+                    data:
+                      applyId: '3f2a6c58-7b41-4d2e-9c05-8ab1f0e6d731'
+                      reviewRound: 1
+                      status: reviewing
+                      latestRevision: 3
+                      importedRevision: 3
+                      importedAt: 1755500000000
+                      updatedAt: 1755600000000
+                unknown:
+                  summary: 未知申请
+                  value:
+                    ok: true
+                    data:
+                      applyId: '00000000-0000-4000-8000-000000000000'
+                      status: unknown
+                      reviewRound: null
+                      latestRevision: null
+                      importedRevision: null
+                      importedAt: null
+                      updatedAt: null
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # ------------------------------------------------------------ 5. 后台认证
+
+  /api/v1/admin/auth/login:
+    post:
+      tags: [后台认证]
+      summary: 后台登录（接口 14）
+      description: |
+        服务商运维登录。返回 15 分钟访问 token 与可删除的刷新 token（决策 #40）。
+        首次启动时若 `admin_user` 为空且配置了 `ADMIN_INITIAL_PASSWORD`，自动创建初始管理员，
+        `mustChangePassword` 为 true 时前端强制跳转改密。登录走严格限流。
+      operationId: adminLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, minLength: 1, maxLength: 64 }
+                password: { type: string, minLength: 8, maxLength: 128 }
+              additionalProperties: false
+            examples:
+              default:
+                value: { username: admin, password: 'change-me-please' }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required:
+                      [accessToken, accessTokenExpiresAt, refreshToken, username, mustChangePassword]
+                    properties:
+                      accessToken: { type: string, minLength: 16 }
+                      accessTokenExpiresAt: { $ref: '#/components/schemas/EpochMs' }
+                      refreshToken: { type: string, minLength: 32 }
+                      username: { type: string }
+                      mustChangePassword: { type: boolean }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: 用户名或密码错误
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                default:
+                  value: { ok: false, error: '用户名或密码错误' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/auth/refresh:
+    post:
+      tags: [后台认证]
+      summary: 刷新访问令牌（接口 15）
+      description: |
+        用刷新 token 换取新的访问 token（决策 #40）。刷新 token 存库，登出即删除；
+        已删除或已过期的刷新 token 返回 401。
+      operationId: adminRefresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string, minLength: 32 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [accessToken, accessTokenExpiresAt]
+                    properties:
+                      accessToken: { type: string, minLength: 16 }
+                      accessTokenExpiresAt: { $ref: '#/components/schemas/EpochMs' }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: 刷新令牌无效或已过期
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                default:
+                  value: { ok: false, error: '登录已过期，请重新登录' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/auth/logout:
+    post:
+      tags: [后台认证]
+      summary: 后台登出（接口 16）
+      description: 删除刷新 token（访问 token 自然过期，无需吊销名单，决策 #40）。幂等。
+      operationId: adminLogout
+      security:
+        - adminToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string, minLength: 32 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 已登出
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [ok]
+                    properties:
+                      ok: { const: true }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/auth/change-password:
+    post:
+      tags: [后台认证]
+      summary: 修改后台密码（接口 17）
+      description: |
+        修改当前管理员密码。成功后清除 `mustChangePassword` 标记，
+        并删除该管理员的全部刷新 token（强制其他会话重新登录）。落审计日志。
+      operationId: adminChangePassword
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [oldPassword, newPassword]
+              properties:
+                oldPassword: { type: string, minLength: 8, maxLength: 128 }
+                newPassword: { type: string, minLength: 12, maxLength: 128 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [ok]
+                    properties:
+                      ok: { const: true }
+                    additionalProperties: false
+                additionalProperties: false
+        '400':
+          description: 新密码不符合强度要求
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                weak:
+                  value: { ok: false, error: '新密码长度至少 12 位' }
+        '401':
+          description: 原密码错误或未登录
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                wrongOld:
+                  value: { ok: false, error: '原密码错误' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # ---------------------------------------------------- 6. 后台单位与授权码
+
+  /api/v1/admin/units:
+    get:
+      tags: [后台单位与授权]
+      summary: 单位列表（接口 18）
+      description: 返回全部单位（含一二级层级关系）。
+      operationId: adminListUnits
+      security:
+        - adminToken: []
+      parameters:
+        - name: level
+          in: query
+          required: false
+          description: 按层级过滤。
+          schema: { enum: [1, 2] }
+      responses:
+        '200':
+          description: 单位列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [units]
+                    properties:
+                      units:
+                        type: array
+                        items: { $ref: '#/components/schemas/UnitSummary' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/ServerError' }
+    post:
+      tags: [后台单位与授权]
+      summary: 创建单位（接口 18）
+      description: |
+        创建单位。二级单位必须指定 `parentId` 与 `templateId`（绑定配置模板），
+        **创建即签发首个授权码**并返回。落审计日志。
+      operationId: adminCreateUnit
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unitId, name, level]
+              properties:
+                unitId: { $ref: '#/components/schemas/UnitId' }
+                name: { type: string, minLength: 1, maxLength: 64 }
+                level: { enum: [1, 2] }
+                unitType:
+                  enum: [college, department, other]
+                parentId:
+                  description: 二级单位必填。
+                  $ref: '#/components/schemas/UnitId'
+                templateId:
+                  description: 二级单位必填，绑定的配置模板 id。
+                  type: string
+                licenseMonths:
+                  description: 首个授权码有效月数，缺省 12。
+                  type: integer
+                  minimum: 1
+                  maximum: 120
+              additionalProperties: false
+      responses:
+        '200':
+          description: 创建成功（含首个授权码）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [unit]
+                    properties:
+                      unit: { $ref: '#/components/schemas/UnitSummary' }
+                      code:
+                        description: 一级单位无授权码时为 null。
+                        oneOf:
+                          - { $ref: '#/components/schemas/LicenseCode' }
+                          - { type: 'null' }
+                      expiresAt:
+                        oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: unitId 已存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                duplicate:
+                  value: { ok: false, error: '该单位标识已存在' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/units/{unitId}:
+    get:
+      tags: [后台单位与授权]
+      summary: 单位详情（接口 18）
+      description: 返回单位、绑定的配置模板版本与授权码列表。
+      operationId: adminGetUnit
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdPath'
+      responses:
+        '200':
+          description: 单位详情
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [unit, licenses]
+                    properties:
+                      unit: { $ref: '#/components/schemas/UnitSummary' }
+                      publicKeyJwk:
+                        oneOf: [{ $ref: '#/components/schemas/Jwk' }, { type: 'null' }]
+                      template:
+                        oneOf:
+                          - { $ref: '#/components/schemas/TemplateVersion' }
+                          - { type: 'null' }
+                      licenses:
+                        type: array
+                        items:
+                          type: object
+                          required: [code, expiresAt, status, createdAt]
+                          properties:
+                            code: { $ref: '#/components/schemas/LicenseCode' }
+                            expiresAt: { $ref: '#/components/schemas/EpochMs' }
+                            status: { $ref: '#/components/schemas/LicenseStatus' }
+                            renewCount: { type: integer, minimum: 0 }
+                            createdAt: { $ref: '#/components/schemas/EpochMs' }
+                          additionalProperties: false
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/units/{unitId}/licenses:
+    post:
+      tags: [后台单位与授权]
+      summary: 签发授权码（接口 19）
+      description: 为指定二级单位签发新授权码。落审计日志。
+      operationId: adminIssueLicense
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [months]
+              properties:
+                months: { type: integer, minimum: 1, maximum: 120 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 签发成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [code, expiresAt]
+                    properties:
+                      code: { $ref: '#/components/schemas/LicenseCode' }
+                      expiresAt: { $ref: '#/components/schemas/EpochMs' }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/licenses/{code}/revoke:
+    post:
+      tags: [后台单位与授权]
+      summary: 作废授权码（接口 19）
+      description: |
+        作废授权码。同时使该授权码派生的全部 `unitToken` 失效（决策 #29）。
+        已作废的授权码重复作废幂等。落审计日志。
+      operationId: adminRevokeLicense
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/licenseCodePath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 200 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 已作废
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [code, status]
+                    properties:
+                      code: { $ref: '#/components/schemas/LicenseCode' }
+                      status: { const: revoked }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/licenses/{code}/renew:
+    post:
+      tags: [后台单位与授权]
+      summary: 续期授权码（接口 19）
+      description: |
+        续期授权码（决策 #40）：过期不再强制重新激活，管理端经
+        `GET /api/v1/license/status` 即可刷新本地有效期。已作废的授权码不可续期（409）。
+        落审计日志。
+      operationId: adminRenewLicense
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/licenseCodePath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [months]
+              properties:
+                months: { type: integer, minimum: 1, maximum: 120 }
+              additionalProperties: false
+            examples:
+              default:
+                value: { months: 12 }
+      responses:
+        '200':
+          description: 续期成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [code, expiresAt, status, renewCount]
+                    properties:
+                      code: { $ref: '#/components/schemas/LicenseCode' }
+                      expiresAt: { $ref: '#/components/schemas/EpochMs' }
+                      status: { $ref: '#/components/schemas/LicenseStatus' }
+                      renewCount: { type: integer, minimum: 1 }
+                    additionalProperties: false
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 已作废的授权码不可续期
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                revoked:
+                  value: { ok: false, error: '授权码已作废，不可续期' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # -------------------------------------------------------- 7. 后台配置模板
+
+  /api/v1/admin/templates:
+    get:
+      tags: [后台配置模板]
+      summary: 配置模板列表（接口 20）
+      description: 返回每个模板 id 的最新版本行（含 draft）。
+      operationId: adminListTemplates
+      security:
+        - adminToken: []
+      responses:
+        '200':
+          description: 模板列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [templates]
+                    properties:
+                      templates:
+                        type: array
+                        items: { $ref: '#/components/schemas/TemplateVersion' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/ServerError' }
+    post:
+      tags: [后台配置模板]
+      summary: 上传配置模板（接口 20）
+      description: |
+        上传单位配置 JSON（须通过 `unit-config.schema.json` 校验）。
+        以 `draft` 状态写入 (id, version, revision)；同三元组已存在 `published` 版本时返回 409
+        （已发布不可修改，决策 #37）。落审计日志。
+      operationId: adminUploadTemplate
+      security:
+        - adminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config]
+              properties:
+                config: { $ref: '#/components/schemas/UnitConfig' }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 上传成功（draft）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data: { $ref: '#/components/schemas/TemplateVersion' }
+                additionalProperties: false
+        '400':
+          description: 配置未通过 schema 校验
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                invalid:
+                  value: { ok: false, error: '配置格式不合法：dyf.categories 不能为空' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: 该版本已发布，不可覆盖
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                published:
+                  value: { ok: false, error: '该版本已发布，请升修订号后再上传' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/templates/{templateId}/versions:
+    get:
+      tags: [后台配置模板]
+      summary: 模板版本历史（接口 20）
+      description: 按 (version, revision) 倒序返回该模板的全部历史版本（决策 #37）。
+      operationId: adminListTemplateVersions
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/templateIdPath'
+      responses:
+        '200':
+          description: 版本历史
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [versions]
+                    properties:
+                      versions:
+                        type: array
+                        items: { $ref: '#/components/schemas/TemplateVersion' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/templates/{templateId}/publish:
+    post:
+      tags: [后台配置模板]
+      summary: 发布模板版本（接口 20）
+      description: |
+        将指定 (version, revision) 置为 `published`，此后不可编辑；
+        同 id 的其他 `published` 版本转为 `archived`。已创建的批次按快照三元组引用，不受影响。
+        落审计日志。
+      operationId: adminPublishTemplate
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/templateIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, revision]
+              properties:
+                version: { type: integer, minimum: 1 }
+                revision: { type: integer, minimum: 0 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 已发布
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data: { $ref: '#/components/schemas/TemplateVersion' }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 该版本已是 published 或已 archived
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                archived:
+                  value: { ok: false, error: '已归档的版本不可发布' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  # ------------------------------------------------------------ 8. 后台运维
+
+  /api/v1/admin/batches:
+    get:
+      tags: [后台运维]
+      summary: 批次列表（接口 21）
+      description: 查看批次公开信息（运维排障用），不含私钥与分数明细。
+      operationId: adminListBatches
+      security:
+        - adminToken: []
+      parameters:
+        - name: unitId
+          in: query
+          required: false
+          description: 按二级单位过滤。
+          schema: { $ref: '#/components/schemas/UnitId' }
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/BatchStatus' }
+      responses:
+        '200':
+          description: 批次列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [batches]
+                    properties:
+                      batches:
+                        type: array
+                        items: { $ref: '#/components/schemas/BatchPublic' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/rebinds:
+    get:
+      tags: [后台运维]
+      summary: 换机记录列表（接口 21）
+      description: 查看换机记录（自助完成的记录仅审计，`pending` 为超频待放行，决策 #40）。
+      operationId: adminListRebinds
+      security:
+        - adminToken: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            enum: [self-served, pending, approved, rejected]
+      responses:
+        '200':
+          description: 换机记录
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [rebinds]
+                    properties:
+                      rebinds:
+                        type: array
+                        items: { $ref: '#/components/schemas/RebindRequest' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/rebinds/{rebindId}/approve:
+    post:
+      tags: [后台运维]
+      summary: 放行超频换机（接口 21）
+      description: |
+        手动放行 `pending` 换机申请（超出月限 3 次的情形）：作废旧码、签发新码。
+        非 `pending` 状态返回 409。落审计日志。
+      operationId: adminApproveRebind
+      security:
+        - adminToken: []
+      parameters:
+        - name: rebindId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve:
+                  description: true 放行 / false 拒绝，缺省 true。
+                  type: boolean
+                reason: { type: string, maxLength: 200 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: 处理完成
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [id, status]
+                    properties:
+                      id: { type: string }
+                      status:
+                        enum: [approved, rejected]
+                      code:
+                        description: 放行时签发的新授权码。
+                        oneOf:
+                          - { $ref: '#/components/schemas/LicenseCode' }
+                          - { type: 'null' }
+                      expiresAt:
+                        oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 该申请不处于待放行状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                notPending:
+                  value: { ok: false, error: '该换机申请无需放行' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [后台运维]
+      summary: 审计日志（接口 21）
+      description: 按时间倒序分页查询后台写操作与授权生命周期事件。
+      operationId: adminListAuditLogs
+      security:
+        - adminToken: []
+      parameters:
+        - name: action
+          in: query
+          required: false
+          description: 按操作类型过滤。
+          schema: { type: string }
+        - name: target
+          in: query
+          required: false
+          description: 按操作对象过滤。
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: 上一页最后一条的 id（游标分页）。
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: 审计日志
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [logs]
+                    properties:
+                      logs:
+                        type: array
+                        items: { $ref: '#/components/schemas/AuditLog' }
+                      nextCursor:
+                        oneOf: [{ type: integer }, { type: 'null' }]
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+
+
+
