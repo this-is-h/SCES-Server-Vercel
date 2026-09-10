@@ -2,15 +2,30 @@
   "name": "sces-server-vercel",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "license": "UNLICENSED",
   "packageManager": "pnpm@10.9.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "prepare": "husky",
-    "commitlint": "commitlint --from origin/develop..HEAD"
+    "commitlint": "commitlint --from origin/develop..HEAD",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit",
+    "sync:contracts": "node scripts/sync-contracts.mjs",
+    "check:contracts": "node scripts/check-contracts.mjs",
+    "verify": "pnpm type-check && pnpm check:contracts && pnpm test"
+  },
+  "dependencies": {
+    "hono": "^4.9.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
     "@commitlint/config-conventional": "^19.8.1",
-    "husky": "^9.1.7"
+    "@types/node": "^24.0.0",
+    "husky": "^9.1.7",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
   }
 }
