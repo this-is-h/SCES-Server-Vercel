@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createApp } from '../src/app'
-import { unusedDb } from './helpers/stub-db'
+import { createApp } from '../src/app.js'
+import { unusedDb } from './helpers/stub-db.js'
 
 const app = createApp({ db: unusedDb })
 

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { APPLY_ID_PATTERN, UUID_PATTERN } from '../lib/hash'
+import { APPLY_ID_PATTERN, UUID_PATTERN } from '../lib/hash.js'
 
 export const applyStatusSchema = z.enum(['draft', 'submitted', 'imported', 'reviewing', 'confirmed'])
 export const revisionSchema = z.number().int().min(1)

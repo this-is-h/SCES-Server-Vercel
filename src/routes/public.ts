@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import type { AppEnv } from '../http/env'
-import { listActiveUnits, type UnitTreeNode } from '../repos/units'
+import type { AppEnv } from '../http/env.js'
+import { listActiveUnits, type UnitTreeNode } from '../repos/units.js'
 
 /** 接口 10：公开单位树（学生端单位选择，无鉴权）。 */
 export const publicRouter = new Hono<AppEnv>()

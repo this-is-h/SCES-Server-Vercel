@@ -1,5 +1,5 @@
 import postgres from 'postgres'
-import type { Db, Row } from './types'
+import type { Db, Row } from './types.js'
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL

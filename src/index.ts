@@ -1,4 +1,4 @@
-import app from './app'
+import app from './app.js'
 
 /**
  * 官方 Hono on Vercel 布局：默认导出 app（https://vercel.com/docs/frameworks/backend/hono）。

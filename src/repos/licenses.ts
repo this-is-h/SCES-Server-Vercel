@@ -1,5 +1,5 @@
-import type { Db } from '../db/types'
-import { generateLicenseCode } from '../lib/hash'
+import type { Db } from '../db/types.js'
+import { generateLicenseCode } from '../lib/hash.js'
 
 export type LicenseRow = {
   code: string

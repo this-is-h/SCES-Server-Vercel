@@ -1,4 +1,4 @@
-import type { Db } from '../db/types'
+import type { Db } from '../db/types.js'
 
 export type BatchRow = {
   id: string

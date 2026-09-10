@@ -1,11 +1,11 @@
 import { createMiddleware } from 'hono/factory'
 import type { Context } from 'hono'
-import { sha256Hex } from '../lib/hash'
-import { forbidden, unauthorized } from '../lib/errors'
-import { effectiveLicenseStatus, findLicenseByCode, type LicenseRow } from '../repos/licenses'
-import { findTokenAuthByHash } from '../repos/unit-tokens'
-import type { AppEnv, UnitAuthContext } from './env'
-import { requireHeader } from './parse'
+import { sha256Hex } from '../lib/hash.js'
+import { forbidden, unauthorized } from '../lib/errors.js'
+import { effectiveLicenseStatus, findLicenseByCode, type LicenseRow } from '../repos/licenses.js'
+import { findTokenAuthByHash } from '../repos/unit-tokens.js'
+import type { AppEnv, UnitAuthContext } from './env.js'
+import { requireHeader } from './parse.js'
 
 /** 自助换机月限（决策 #40）。 */
 export const REBIND_MONTHLY_LIMIT = 3

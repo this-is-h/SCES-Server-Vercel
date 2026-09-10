@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { Hono } from 'hono'
-import type { Db } from '../../src/db/types'
-import type { AppEnv } from '../../src/http/env'
-import { readData } from './http'
+import type { Db } from '../../src/db/types.js'
+import type { AppEnv } from '../../src/http/env.js'
+import { readData } from './http.js'
 
 export const TEST_LICENSE_CODE = 'A1B2-C3D4-E5F6-G7H8'
 export const TEST_INSTALL_ID = 'install-test-1'

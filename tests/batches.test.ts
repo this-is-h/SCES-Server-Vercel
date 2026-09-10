@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Hono } from 'hono'
-import { createApp } from '../src/app'
-import type { AppEnv } from '../src/http/env'
-import { createTestDb, type TestDb } from './helpers/db'
-import { activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures'
-import { readData, readError } from './helpers/http'
+import { createApp } from '../src/app.js'
+import type { AppEnv } from '../src/http/env.js'
+import { createTestDb, type TestDb } from './helpers/db.js'
+import { activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
+import { readData, readError } from './helpers/http.js'
 
 type App = Hono<AppEnv>
 

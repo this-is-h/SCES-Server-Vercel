@@ -1,7 +1,7 @@
 import { createMiddleware } from 'hono/factory'
-import type { AppEnv } from './env'
-import { ApiError } from '../lib/errors'
-import { clientIp } from './parse'
+import type { AppEnv } from './env.js'
+import { ApiError } from '../lib/errors.js'
+import { clientIp } from './parse.js'
 
 /** 授权/隐私关键接口的严格档（契约 429 文案「操作过于频繁，请稍后再试」）。 */
 export const STRICT_RATE_LIMIT = { windowMs: 60_000, max: 30 } as const

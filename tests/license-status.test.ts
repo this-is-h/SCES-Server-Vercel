@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app'
-import { createTestDb, type TestDb } from './helpers/db'
-import { activateUnit, seedTestUnit, unitHeaders } from './helpers/fixtures'
-import { readData, readError } from './helpers/http'
+import { createApp } from '../src/app.js'
+import { createTestDb, type TestDb } from './helpers/db.js'
+import { activateUnit, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
+import { readData, readError } from './helpers/http.js'
 
 type LicenseStatusData = {
   code: string

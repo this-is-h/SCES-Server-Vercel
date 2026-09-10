@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
-import type { AppEnv } from '../http/env'
-import { assertLevelOne, requireUnitToken, requireWritableUnit } from '../http/guards'
-import { clientIp, readJsonObject, readOptionalJsonObject } from '../http/parse'
-import { recordAudit } from '../lib/audit'
-import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/errors'
-import { APPLY_ID_PATTERN, UUID_PATTERN, sha256Hex } from '../lib/hash'
+import type { AppEnv } from '../http/env.js'
+import { assertLevelOne, requireUnitToken, requireWritableUnit } from '../http/guards.js'
+import { clientIp, readJsonObject, readOptionalJsonObject } from '../http/parse.js'
+import { recordAudit } from '../lib/audit.js'
+import { ApiError, badRequest, conflict, forbidden, notFound } from '../lib/errors.js'
+import { APPLY_ID_PATTERN, UUID_PATTERN, sha256Hex } from '../lib/hash.js'
 import {
   APPLY_STATUS_ORDER,
   advanceStatus,
@@ -16,10 +16,10 @@ import {
   updateLatestRevision,
   type ApplyStatus,
   type ApplyStatusRecord,
-} from '../repos/apply-status'
-import { applyStatusBodySchema, bulkApplyBodySchema, registerBodySchema, reviewRoundBodySchema } from '../schemas/apply'
-import { findBatchById } from '../repos/batches'
-import { findUnitById } from '../repos/units'
+} from '../repos/apply-status.js'
+import { applyStatusBodySchema, bulkApplyBodySchema, registerBodySchema, reviewRoundBodySchema } from '../schemas/apply.js'
+import { findBatchById } from '../repos/batches.js'
+import { findUnitById } from '../repos/units.js'
 /** 批量（接口 7）逐条结果：记录字段 + ok/error 标记。 */
 type BulkResultItem = ApplyStatusRecord & { ok: boolean; error: string | null }
 

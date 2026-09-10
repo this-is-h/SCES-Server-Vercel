@@ -1,7 +1,7 @@
 import { PGlite } from '@electric-sql/pglite'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { Db } from '../../src/db/types'
+import type { Db } from '../../src/db/types.js'
 
 const migrationSql = readFileSync(
   fileURLToPath(new URL('../../supabase/migrations/0001_init.sql', import.meta.url)),

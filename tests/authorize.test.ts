@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app'
-import { sha256Hex } from '../src/lib/hash'
-import { createTestDb, type TestDb } from './helpers/db'
-import { TEST_INSTALL_ID, activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures'
-import { readData, readError } from './helpers/http'
+import { createApp } from '../src/app.js'
+import { sha256Hex } from '../src/lib/hash.js'
+import { createTestDb, type TestDb } from './helpers/db.js'
+import { TEST_INSTALL_ID, activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
+import { readData, readError } from './helpers/http.js'
 
 type AuthorizeData = {
   unit: { unitId: string; unitName: string; unitType: string; level: number; parentUnitId: string | null }

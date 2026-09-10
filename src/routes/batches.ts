@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
-import type { AppEnv } from '../http/env'
-import { requireUnitToken, requireWritableUnit } from '../http/guards'
-import { readJsonObject } from '../http/parse'
-import { isUniqueViolation } from '../db/errors'
-import { ApiError, badRequest, conflict, notFound } from '../lib/errors'
-import { UNIT_ID_PATTERN, UUID_PATTERN } from '../lib/hash'
+import type { AppEnv } from '../http/env.js'
+import { requireUnitToken, requireWritableUnit } from '../http/guards.js'
+import { readJsonObject } from '../http/parse.js'
+import { isUniqueViolation } from '../db/errors.js'
+import { ApiError, badRequest, conflict, notFound } from '../lib/errors.js'
+import { UNIT_ID_PATTERN, UUID_PATTERN } from '../lib/hash.js'
 import {
   BATCH_STATUS_ORDER,
   findActiveBatch,
@@ -14,10 +14,10 @@ import {
   toBatchPublic,
   updateBatchStatus,
   type BatchStatus,
-} from '../repos/batches'
-import { findTemplateVersion, toUnitConfig } from '../repos/config-templates'
-import { findUnitById } from '../repos/units'
-import { batchPayloadSchema, batchStatusSchema } from '../schemas/batch'
+} from '../repos/batches.js'
+import { findTemplateVersion, toUnitConfig } from '../repos/config-templates.js'
+import { findUnitById } from '../repos/units.js'
+import { batchPayloadSchema, batchStatusSchema } from '../schemas/batch.js'
 
 /** 接口 5/6/11：批次登记、状态同步、活跃批次下发。 */
 export const batchesRouter = new Hono<AppEnv>()

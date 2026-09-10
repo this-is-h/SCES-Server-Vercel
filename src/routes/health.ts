@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import type { AppEnv } from '../http/env'
-import { ARCHITECTURE } from '../constants'
+import type { AppEnv } from '../http/env.js'
+import { ARCHITECTURE } from '../constants.js'
 
 /**
  * 探活（不计入 21 个业务接口）：GET /api/v1/health

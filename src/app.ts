@@ -1,15 +1,16 @@
 import { Hono } from 'hono'
-import type { Db } from './db/types'
-import type { AppEnv } from './http/env'
-import { createRateLimiter, STRICT_RATE_LIMIT } from './http/rate-limit'
-import { ApiError } from './lib/errors'
-import { appliesRouter } from './routes/applies'
-import { authorizeRouter } from './routes/authorize'
-import { batchesRouter } from './routes/batches'
-import { healthRouter } from './routes/health'
-import { licenseRouter } from './routes/license'
-import { publicRouter } from './routes/public'
-import { unitsRouter } from './routes/units'
+import { lazyDb } from './db/client.js'
+import type { Db } from './db/types.js'
+import type { AppEnv } from './http/env.js'
+import { createRateLimiter, STRICT_RATE_LIMIT } from './http/rate-limit.js'
+import { ApiError } from './lib/errors.js'
+import { appliesRouter } from './routes/applies.js'
+import { authorizeRouter } from './routes/authorize.js'
+import { batchesRouter } from './routes/batches.js'
+import { healthRouter } from './routes/health.js'
+import { licenseRouter } from './routes/license.js'
+import { publicRouter } from './routes/public.js'
+import { unitsRouter } from './routes/units.js'
 
 export interface AppDeps {
   /** 运行时为 Supabase 延迟连接；测试注入 PGlite。 */
@@ -51,3 +52,6 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   return app
 }
+/** 生产单例：官方 Hono on Vercel 布局要求 src/index.ts 默认导出 app。 */
+const productionApp = createApp({ db: lazyDb })
+export default productionApp
