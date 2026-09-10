@@ -3,6 +3,7 @@ import type { Db } from './db/types'
 import type { AppEnv } from './http/env'
 import { ApiError } from './lib/errors'
 import { authorizeRouter } from './routes/authorize'
+import { batchesRouter } from './routes/batches'
 import { healthRouter } from './routes/health'
 import { licenseRouter } from './routes/license'
 import { unitsRouter } from './routes/units'
@@ -36,6 +37,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.route('/api/v1', authorizeRouter)
   app.route('/api/v1', unitsRouter)
   app.route('/api/v1', licenseRouter)
+  app.route('/api/v1', batchesRouter)
 
   return app
 }
