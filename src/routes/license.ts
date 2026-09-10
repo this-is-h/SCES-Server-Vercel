@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
-import type { AppEnv } from '../http/env'
-import { assertUnitIdentity, requireUnitToken } from '../http/guards'
-import { forbidden, notFound, unauthorized } from '../lib/errors'
-import { effectiveLicenseStatus, findLicenseByCode } from '../repos/licenses'
-import { findUnitById, toUnitSummary } from '../repos/units'
+import type { AppEnv } from '../http/env.js'
+import { assertUnitIdentity, requireUnitToken } from '../http/guards.js'
+import { forbidden, notFound, unauthorized } from '../lib/errors.js'
+import { effectiveLicenseStatus, findLicenseByCode } from '../repos/licenses.js'
+import { findUnitById, toUnitSummary } from '../repos/units.js'
 
 /** 接口 4：授权状态拉取（unitToken；过期不报错，返回 status=expired 供管理端提醒）。 */
 export const licenseRouter = new Hono<AppEnv>()

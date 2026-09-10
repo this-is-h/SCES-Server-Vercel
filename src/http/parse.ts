@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import { badRequest } from '../lib/errors'
+import { badRequest } from '../lib/errors.js'
 
 /** 解析 JSON 请求体；非对象或非法 JSON 一律 400「请求参数不合法」。 */
 export async function readJsonObject(c: Context): Promise<Record<string, unknown>> {

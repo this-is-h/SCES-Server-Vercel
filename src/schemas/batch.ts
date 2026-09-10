@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { UUID_PATTERN } from '../lib/hash'
-import { publicKeyJwkSchema } from '../lib/jwk'
+import { UUID_PATTERN } from '../lib/hash.js'
+import { publicKeyJwkSchema } from '../lib/jwk.js'
 
 const epoch = z.number().int().min(0)
 const ratio = z.number().min(0).max(1)

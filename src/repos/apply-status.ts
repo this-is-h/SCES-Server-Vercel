@@ -1,4 +1,4 @@
-import type { Db } from '../db/types'
+import type { Db } from '../db/types.js'
 
 export type ApplyStatus = 'draft' | 'submitted' | 'imported' | 'reviewing' | 'confirmed'
 

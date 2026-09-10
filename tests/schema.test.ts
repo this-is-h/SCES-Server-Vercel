@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createTestDb, type TestDb } from './helpers/db'
+import { createTestDb, type TestDb } from './helpers/db.js'
 
 /** 契约 DDL（schema-web.sql）的 11 张表。 */
 const CONTRACT_TABLES = [

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Hono } from 'hono'
-import { createApp } from '../src/app'
-import type { AppEnv } from '../src/http/env'
-import { sha256Hex } from '../src/lib/hash'
-import { createTestDb, type TestDb } from './helpers/db'
+import { createApp } from '../src/app.js'
+import type { AppEnv } from '../src/http/env.js'
+import { sha256Hex } from '../src/lib/hash.js'
+import { createTestDb, type TestDb } from './helpers/db.js'
 import {
   activateUnit,
   jsonHeaders,
@@ -12,8 +12,8 @@ import {
   seedLevelOneUnit,
   seedTestUnit,
   unitHeaders,
-} from './helpers/fixtures'
-import { readData, readError } from './helpers/http'
+} from './helpers/fixtures.js'
+import { readData, readError } from './helpers/http.js'
 
 type App = Hono<AppEnv>
 

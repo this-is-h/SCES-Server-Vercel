@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app'
-import { createTestDb, type TestDb } from './helpers/db'
-import { TEST_JWK, activateUnit, seedTestUnit, unitHeaders } from './helpers/fixtures'
-import { readData, readError } from './helpers/http'
+import { createApp } from '../src/app.js'
+import { createTestDb, type TestDb } from './helpers/db.js'
+import { TEST_JWK, activateUnit, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
+import { readData, readError } from './helpers/http.js'
 
 const publicKeyUrl = (unitId: string) => `http://internal/api/v1/units/${unitId}/public-key`
 

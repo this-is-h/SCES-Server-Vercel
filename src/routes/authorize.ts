@@ -1,13 +1,13 @@
 import { Hono } from 'hono'
 import { randomUUID } from 'node:crypto'
-import type { AppEnv } from '../http/env'
-import { readJsonObject, requireHeader, requireString } from '../http/parse'
-import { ApiError, badRequest, forbidden, notFound } from '../lib/errors'
-import { LICENSE_CODE_PATTERN, randomToken, sha256Hex } from '../lib/hash'
-import { effectiveLicenseStatus, findLicenseByCode } from '../repos/licenses'
-import { findPublishedTemplate, toUnitConfig } from '../repos/config-templates'
-import { insertUnitToken, revokeActiveTokensForInstall } from '../repos/unit-tokens'
-import { findUnitById, toUnitSummary } from '../repos/units'
+import type { AppEnv } from '../http/env.js'
+import { readJsonObject, requireHeader, requireString } from '../http/parse.js'
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors.js'
+import { LICENSE_CODE_PATTERN, randomToken, sha256Hex } from '../lib/hash.js'
+import { effectiveLicenseStatus, findLicenseByCode } from '../repos/licenses.js'
+import { findPublishedTemplate, toUnitConfig } from '../repos/config-templates.js'
+import { insertUnitToken, revokeActiveTokensForInstall } from '../repos/unit-tokens.js'
+import { findUnitById, toUnitSummary } from '../repos/units.js'
 
 /** 接口 1：授权码核验（公开；严格限流在 createApp 内统一挂载）。 */
 export const authorizeRouter = new Hono<AppEnv>()

@@ -1,4 +1,4 @@
-import type { Db } from '../../src/db/types'
+import type { Db } from '../../src/db/types.js'
 
 /** 不触碰数据库的用例（health 等）注入此桩；任何查询都意味着用例越界。 */
 export const unusedDb: Db = {

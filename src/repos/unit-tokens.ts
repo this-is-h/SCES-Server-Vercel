@@ -1,4 +1,4 @@
-import type { Db } from '../db/types'
+import type { Db } from '../db/types.js'
 
 /** 令牌校验所需的联表行（unit_token ⋈ license ⋈ unit）。 */
 export type TokenAuthRow = {
