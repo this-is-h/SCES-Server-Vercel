@@ -6,7 +6,7 @@ import { clientIp, optionalString, readJsonObject, readOptionalJsonObject } from
 import { recordAudit } from '../lib/audit'
 import { badRequest, forbidden, notFound, unauthorized } from '../lib/errors'
 import { UNIT_ID_PATTERN } from '../lib/hash'
-import { parsePublicKeyJwk } from '../lib/jwk'
+import { publicKeyJwkSchema } from '../lib/jwk'
 import { monthKey } from '../lib/time'
 import { countRebindsInMonth, insertRebind } from '../repos/rebinds'
 import { findLicenseByCode, issueLicense, revokeLicense } from '../repos/licenses'
@@ -96,8 +96,8 @@ unitsRouter.post('/units/:unitId/public-key', requireUnitToken, async (c) => {
   assertUnitIdentity(c, auth, unitId)
 
   const body = await readJsonObject(c)
-  const jwk = parsePublicKeyJwk(body.publicKeyJwk)
-  if (jwk === undefined) throw badRequest()
+  const jwk = publicKeyJwkSchema.safeParse(body.publicKeyJwk)
+  if (!jwk.success) throw badRequest()
 
   const db = c.get('db')
   const license = await findLicenseByCode(db, auth.licenseCode)
@@ -109,8 +109,13 @@ unitsRouter.post('/units/:unitId/public-key', requireUnitToken, async (c) => {
 
   // 同一公钥重复上报幂等（比较 kty/n/e 语义值，忽略 JSON 字段顺序）
   if (unit.public_key_jwk !== null) {
-    const current = parsePublicKeyJwk(JSON.parse(unit.public_key_jwk))
-    if (current !== undefined && current.kty === jwk.kty && current.n === jwk.n && current.e === jwk.e) {
+    const current = publicKeyJwkSchema.safeParse(JSON.parse(unit.public_key_jwk))
+    if (
+      current.success &&
+      current.data.kty === jwk.data.kty &&
+      current.data.n === jwk.data.n &&
+      current.data.e === jwk.data.e
+    ) {
       return c.json({ ok: true as const, data: { ok: true as const } })
     }
   }
