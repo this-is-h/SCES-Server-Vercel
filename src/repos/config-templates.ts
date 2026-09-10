@@ -44,6 +44,20 @@ export async function findPublishedTemplate(db: Db, unitId: string): Promise<Con
   return rows[0]
 }
 
+/** 批次以 (id, version, revision) 三元组快照引用模板（决策 #37）。 */
+export async function findTemplateVersion(
+  db: Db,
+  templateId: string,
+  version: number,
+  revision: number,
+): Promise<ConfigTemplateRow | undefined> {
+  const rows = await db.query<ConfigTemplateRow>(
+    `SELECT * FROM config_template WHERE id = $1 AND version = $2 AND revision = $3`,
+    [templateId, version, revision],
+  )
+  return rows[0]
+}
+
 export function toUnitConfig(row: ConfigTemplateRow): UnitConfig {
   return {
     schemaVersion: row.schema_version,

@@ -6,6 +6,9 @@ export const LICENSE_CODE_PATTERN = /^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/
 /** 契约 UnitId：camelCase，字母开头、仅字母数字。 */
 export const UNIT_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9]*$/
 
+/** 契约 BatchId / ApplyId：UUID v4（管理端或学生端生成）。 */
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const LICENSE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
 /** applyId / unitToken 一律只存 SHA-256 哈希（数据主权红线），查询时现算现比。 */
