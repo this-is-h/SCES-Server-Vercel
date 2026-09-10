@@ -19,4 +19,4 @@
 - 部署目标：Vercel（Node runtime + 托管 Postgres）；功能在后续里程碑实现。
 
 ## 状态
-骨架已就绪（README/CONTRIBUTING/husky/commitlint）。服务端实现（web/、契约接入、部署配置）尚未建设。
+骨架与 M1 单位/授权链路已落地：Vercel 单函数入口（`api/`）+ Hono 路由、SQL 抽象与仓储层（运行时 postgres.js / 测试 PGlite）、契约受控镜像（`contracts/`，`sync:contracts` + `check:contracts`）、建库迁移镜像（`supabase/migrations/`，`db:migrate`）。接口 1–4（authorize / public-key / rebind / license-status）已实现并有 30 条用例覆盖（含数据主权红线断言）。待建：M2 批次与申请（接口 5–13）、M3 后台（接口 14–21 + 同仓管理后台前端）、M4 限流等加固。
