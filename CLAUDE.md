@@ -11,7 +11,7 @@
 - `feature/*`/`bugfix/*`/`chore/*`（从 develop 创建，合并回 develop）；`hotfix/*`（从 main 创建）
 
 ### 提交规范
-格式：`<type>(<scope>): <subject>`；type ∈ feat/fix/docs/style/refactor/perf/test/chore/build/ci/revert；scope 可选小写（web/schema/openapi/docs/build/ci/deps）；subject ≤50 字符、小写祈使句、无句号。
+格式：`<type>(<scope>): <subject>`；type ∈ feat/fix/docs/style/refactor/perf/test/chore/build/ci/revert；scope 可选小写（web/api/contracts/db/admin/schema/openapi/docs/build/ci/deps）；subject ≤50 字符、小写祈使句、无句号。
 
 ### 红线
 - 接口唯一权威 = SCES-Server `contracts/`（OpenAPI 3.1 + unit-config.schema.json）；本仓不重定义接口，契约改动先走 SCES-Server 的 `build` + `verify`。
@@ -19,4 +19,4 @@
 - 部署目标：Vercel（Node runtime + 托管 Postgres）；功能在后续里程碑实现。
 
 ## 状态
-骨架已就绪（README/CONTRIBUTING/husky/commitlint）。服务端实现（web/、契约接入、部署配置）尚未建设。
+骨架、M1 单位/授权与 M2 批次/申请已落地：Vercel 单函数入口（`api/`）+ Hono 路由、SQL 抽象与仓储层（运行时 postgres.js / 测试 PGlite）、契约受控镜像（`contracts/`，`sync:contracts` + `check:contracts`）、建库迁移镜像（`supabase/migrations/`，`db:migrate`）。已实现接口 1–13（授权四接口、批次 5/6/11、申请 7/8/9/12/13、公开单位树 10），63 条用例覆盖（含数据主权红线断言、状态机单调性、限流）。待建：M3 后台（接口 14–21 + 同仓管理后台前端）、M4 加固收尾。
