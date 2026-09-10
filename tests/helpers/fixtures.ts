@@ -61,20 +61,22 @@ export async function seedTestUnit(
   const at = Date.now()
   const unitId = seed.unit.unitId
   const expiresAt = options.expiresAt ?? at + 30 * 86_400_000
-
   await db.query(
     `INSERT INTO unit (id, name, unit_type, parent_id, level, status, created_at, updated_at)
-     VALUES ($1, $2, 'other', NULL, 1, 'active', $3, $3)`,
+     VALUES ($1, $2, 'other', NULL, 1, 'active', $3, $3)
+     ON CONFLICT (id) DO NOTHING`,
     [seed.unit.parentUnit.unitId, seed.unit.parentUnit.name, at],
   )
   await db.query(
     `INSERT INTO unit (id, name, unit_type, parent_id, level, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, 2, $5, $6, $6)`,
+     VALUES ($1, $2, $3, $4, 2, $5, $6, $6)
+     ON CONFLICT (id) DO NOTHING`,
     [unitId, seed.unit.name, seed.unit.unitType, seed.unit.parentUnit.unitId, options.unitStatus ?? 'active', at],
   )
   await db.query(
     `INSERT INTO license (code, unit_id, expires_at, status, renew_count, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, 0, $5, $5)`,
+     VALUES ($1, $2, $3, $4, 0, $5, $5)
+     ON CONFLICT (code) DO NOTHING`,
     [TEST_LICENSE_CODE, unitId, expiresAt, options.licenseStatus ?? 'active', at],
   )
   if (options.published !== false) {
@@ -82,7 +84,8 @@ export async function seedTestUnit(
       `INSERT INTO config_template
          (id, unit_id, name, version, revision, status, schema_version,
           unit_json, class_json, student_json, dyf_json, calc_json, rank_json, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'published', $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+       VALUES ($1, $2, $3, $4, $5, 'published', $6, $7, $8, $9, $10, $11, $12, $13, $13)
+       ON CONFLICT (id, version, revision) DO NOTHING`,
       [
         seed.id,
         unitId,
@@ -134,4 +137,66 @@ export async function activateUnit(
   if (res.status !== 200) throw new Error(`激活失败：HTTP ${res.status}`)
   const data = await readData<{ unitToken: string }>(res)
   return data.unitToken
+}
+
+let batchSeq = 0
+/** 每个用例独立的 UUID（格式合规即可，非真实 v4 校验位）。 */
+export function nextBatchId(): string {
+  batchSeq += 1
+  return `b1c9d4e2-5a37-4f18-9d6b-${String(batchSeq).padStart(12, '0')}`
+}
+
+let applySeq = 0
+/** 每个用例独立的 UUID v4 学生申请 id。 */
+export function nextApplyId(): string {
+  applySeq += 1
+  return `3f2a6c58-7b41-4d2e-9c05-${String(applySeq).padStart(12, '0')}`
+}
+
+/**
+ * 灌入一级单位 + 其授权码（新一轮审核需要一级单位令牌，决策 #31）。
+ * 激活链路要求目标单位有 published 配置模板，故与 seedTestUnit 共用同一份种子模板
+ * （config_template 主键是 (id, version, revision)，二级单位先建则此处跳过）。
+ */
+export async function seedLevelOneUnit(
+  db: Db,
+  options: { code?: string } = {},
+): Promise<{ unitId: string; code: string }> {
+  const seed = loadTestSeed()
+  const at = Date.now()
+  const code = options.code ?? 'LLLL-LLLL-LLLL-LLLL'
+  await db.query(
+    `INSERT INTO unit (id, name, unit_type, parent_id, level, status, created_at, updated_at)
+     VALUES ('test', '测试学校', 'other', NULL, 1, 'active', $1, $1)
+     ON CONFLICT (id) DO NOTHING`,
+    [at],
+  )
+  await db.query(
+    `INSERT INTO license (code, unit_id, expires_at, status, renew_count, created_at, updated_at)
+     VALUES ($1, 'test', $2, 'active', 0, $3, $3)
+     ON CONFLICT (code) DO NOTHING`,
+    [code, at + 30 * 86_400_000, at],
+  )
+  await db.query(
+    `INSERT INTO config_template
+       (id, unit_id, name, version, revision, status, schema_version,
+        unit_json, class_json, student_json, dyf_json, calc_json, rank_json, created_at, updated_at)
+     VALUES ($1, 'test', $2, $3, $4, 'published', $5, $6, $7, $8, $9, $10, $11, $12, $12)
+     ON CONFLICT (id, version, revision) DO NOTHING`,
+    [
+      `${seed.id}-l1`,
+      seed.name,
+      seed.version,
+      seed.revision,
+      seed.schemaVersion,
+      JSON.stringify(seed.unit),
+      JSON.stringify(seed.class),
+      JSON.stringify(seed.student),
+      JSON.stringify(seed.dyf),
+      JSON.stringify(seed.calc),
+      JSON.stringify(seed.rank),
+      at,
+    ],
+  )
+  return { unitId: 'test', code }
 }
