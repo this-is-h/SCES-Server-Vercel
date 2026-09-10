@@ -11,6 +11,7 @@ export type TokenAuthRow = {
   license_status: string
   license_expires_at: number
   unit_status: string
+  unit_level: number
 }
 
 export async function insertUnitToken(
@@ -48,7 +49,8 @@ export async function findTokenAuthByHash(db: Db, tokenHash: string): Promise<To
             t.expires_at    AS token_expires_at,
             l.status        AS license_status,
             l.expires_at    AS license_expires_at,
-            u.status        AS unit_status
+            u.status        AS unit_status,
+            u.level         AS unit_level
      FROM unit_token t
      JOIN license l ON l.code = t.license_code
      JOIN unit u ON u.id = t.unit_id
