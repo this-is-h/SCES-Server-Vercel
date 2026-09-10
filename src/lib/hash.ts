@@ -9,6 +9,10 @@ export const UNIT_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9]*$/
 /** 契约 BatchId / ApplyId：UUID v4（管理端或学生端生成）。 */
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** 契约 ApplyId：严格 UUID v4（版本 4 + 变体位 8/9/a/b）。 */
+export const APPLY_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 const LICENSE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
 /** applyId / unitToken 一律只存 SHA-256 哈希（数据主权红线），查询时现算现比。 */

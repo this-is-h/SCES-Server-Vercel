@@ -6,6 +6,7 @@ export interface UnitAuthContext {
   unitId: string
   installId: string
   licenseCode: string
+  unitLevel: number
 }
 
 export interface AppEnv {

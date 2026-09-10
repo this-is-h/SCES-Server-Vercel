@@ -43,3 +43,24 @@ export function toUnitSummary(unit: UnitRow): UnitSummary {
     parentUnitId: unit.parent_id,
   }
 }
+
+/** 契约 UnitTreeNode：公开单位树节点（学生端单位选择，无配置/授权信息）。 */
+export type UnitTreeNode = {
+  text: string
+  value: string
+  children?: UnitTreeNode[]
+}
+
+export type ActiveUnitRow = {
+  id: string
+  name: string
+  level: number
+  parent_id: string | null
+}
+
+/** 公开单位树（接口 10）：仅 active 单位，一级为分组、二级为叶子（决策 #34）。 */
+export async function listActiveUnits(db: Db): Promise<ActiveUnitRow[]> {
+  return db.query<ActiveUnitRow>(
+    `SELECT id, name, level, parent_id FROM unit WHERE status = 'active' ORDER BY created_at`,
+  )
+}

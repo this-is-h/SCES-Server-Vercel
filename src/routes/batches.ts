@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import type { AppEnv } from '../http/env'
-import { assertLicenseUsable, assertUnitIdentity, requireUnitToken } from '../http/guards'
+import { requireUnitToken, requireWritableUnit } from '../http/guards'
 import { readJsonObject } from '../http/parse'
 import { isUniqueViolation } from '../db/errors'
-import { ApiError, badRequest, conflict, notFound, unauthorized } from '../lib/errors'
+import { ApiError, badRequest, conflict, notFound } from '../lib/errors'
 import { UNIT_ID_PATTERN, UUID_PATTERN } from '../lib/hash'
 import {
   BATCH_STATUS_ORDER,
@@ -16,22 +16,11 @@ import {
   type BatchStatus,
 } from '../repos/batches'
 import { findTemplateVersion, toUnitConfig } from '../repos/config-templates'
-import { findLicenseByCode } from '../repos/licenses'
 import { findUnitById } from '../repos/units'
 import { batchPayloadSchema, batchStatusSchema } from '../schemas/batch'
 
 /** 接口 5/6/11：批次登记、状态同步、活跃批次下发。 */
 export const batchesRouter = new Hono<AppEnv>()
-
-/** 写接口公共前置：令牌上下文一致性 + 授权处于有效期内。 */
-async function requireWritableUnit(c: Parameters<typeof assertUnitIdentity>[0]) {
-  const auth = c.get('unitAuth')
-  assertUnitIdentity(c, auth)
-  const license = await findLicenseByCode(c.get('db'), auth.licenseCode)
-  if (license === undefined) throw unauthorized()
-  assertLicenseUsable(license)
-  return auth
-}
 
 batchesRouter.post('/batches', requireUnitToken, async (c) => {
   const auth = await requireWritableUnit(c)

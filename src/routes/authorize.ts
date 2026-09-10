@@ -9,7 +9,7 @@ import { findPublishedTemplate, toUnitConfig } from '../repos/config-templates'
 import { insertUnitToken, revokeActiveTokensForInstall } from '../repos/unit-tokens'
 import { findUnitById, toUnitSummary } from '../repos/units'
 
-/** 接口 1：授权码核验（公开）。 */
+/** 接口 1：授权码核验（公开；严格限流在 createApp 内统一挂载）。 */
 export const authorizeRouter = new Hono<AppEnv>()
 
 authorizeRouter.post('/authorize', async (c) => {

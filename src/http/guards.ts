@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory'
 import type { Context } from 'hono'
 import { sha256Hex } from '../lib/hash'
 import { forbidden, unauthorized } from '../lib/errors'
-import { effectiveLicenseStatus, type LicenseRow } from '../repos/licenses'
+import { effectiveLicenseStatus, findLicenseByCode, type LicenseRow } from '../repos/licenses'
 import { findTokenAuthByHash } from '../repos/unit-tokens'
 import type { AppEnv, UnitAuthContext } from './env'
 import { requireHeader } from './parse'
@@ -30,6 +30,7 @@ export const requireUnitToken = createMiddleware<AppEnv>(async (c, next) => {
     unitId: row.unit_id,
     installId: row.install_id,
     licenseCode: row.license_code,
+    unitLevel: row.unit_level,
   })
   await next()
 })
@@ -46,6 +47,21 @@ export function assertUnitIdentity(c: Context<AppEnv>, auth: UnitAuthContext, pa
     headerInstallId !== auth.installId ||
     (pathUnitId !== undefined && pathUnitId !== auth.unitId)
   if (mismatched) throw forbidden('授权校验未通过，请重新激活')
+}
+
+/** 新一轮审核仅一级单位令牌可发起（决策 #30/#31）。 */
+export function assertLevelOne(auth: UnitAuthContext): void {
+  if (auth.unitLevel !== 1) throw forbidden('仅一级单位可发起新一轮审核')
+}
+
+/** 写接口公共前置：令牌上下文一致性 + 授权处于有效期内。 */
+export async function requireWritableUnit(c: Context<AppEnv>): Promise<UnitAuthContext> {
+  const auth = c.get('unitAuth')
+  assertUnitIdentity(c, auth)
+  const license = await findLicenseByCode(c.get('db'), auth.licenseCode)
+  if (license === undefined) throw unauthorized()
+  assertLicenseUsable(license)
+  return auth
 }
 
 /** 写接口要求授权处于有效期内（revoked/expired 的差异化中文文案）。 */
