@@ -1,0 +1,4 @@
+# 统一行尾为 LF：契约镜像（contracts/、supabase/migrations/0001_init.sql）
+# 按字节 sha256 校验（scripts/check-contracts.mjs），任何平台检出都必须得到
+# 与权威源一致的字节，否则 Windows 的 autocrlf 会把校验搞挂。
+* text=auto eol=lf
