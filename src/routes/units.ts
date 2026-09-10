@@ -1,0 +1,131 @@
+import { Hono } from 'hono'
+import { randomUUID } from 'node:crypto'
+import type { AppEnv } from '../http/env'
+import { REBIND_MONTHLY_LIMIT, assertLicenseUsable, assertUnitIdentity, requireUnitToken } from '../http/guards'
+import { clientIp, optionalString, readJsonObject, readOptionalJsonObject } from '../http/parse'
+import { recordAudit } from '../lib/audit'
+import { badRequest, forbidden, notFound, unauthorized } from '../lib/errors'
+import { UNIT_ID_PATTERN } from '../lib/hash'
+import { publicKeyJwkSchema } from '../lib/jwk'
+import { monthKey } from '../lib/time'
+import { countRebindsInMonth, insertRebind } from '../repos/rebinds'
+import { findLicenseByCode, issueLicense, revokeLicense } from '../repos/licenses'
+import { revokeActiveTokensForLicense } from '../repos/unit-tokens'
+import { findUnitById, updateUnitPublicKey } from '../repos/units'
+
+/** 接口 2/3：公钥上报与自助换机（unitToken）。 */
+export const unitsRouter = new Hono<AppEnv>()
+
+unitsRouter.post('/units/rebind', requireUnitToken, async (c) => {
+  const auth = c.get('unitAuth')
+  assertUnitIdentity(c, auth)
+  const body = await readOptionalJsonObject(c)
+  const reason = optionalString(body, 'reason') ?? null
+  const db = c.get('db')
+
+  const license = await findLicenseByCode(db, auth.licenseCode)
+  if (license === undefined) throw unauthorized()
+  assertLicenseUsable(license)
+
+  const unit = await findUnitById(db, auth.unitId)
+  if (unit === undefined) throw notFound()
+  if (unit.status !== 'active') throw forbidden('授权已失效，请重新激活')
+
+  const at = Date.now()
+  const key = monthKey(at)
+  const used = await countRebindsInMonth(db, auth.unitId, key)
+  if (used >= REBIND_MONTHLY_LIMIT) {
+    // 超频：留 pending 记录待后台放行，本次不换机
+    await insertRebind(db, {
+      id: randomUUID(),
+      unitId: auth.unitId,
+      installId: auth.installId,
+      reason,
+      oldCode: license.code,
+      newCode: null,
+      status: 'pending',
+      monthKey: key,
+      monthCount: used + 1,
+      resolvedAt: null,
+    })
+    await recordAudit(db, {
+      action: 'rebind-pending',
+      target: auth.unitId,
+      detail: '本月换机次数超限，转后台放行',
+      ip: clientIp(c) ?? null,
+    })
+    throw forbidden('本月更换设备次数已达上限，请联系服务商')
+  }
+
+  const newCode = await db.transaction(async (tx) => {
+    const code = await issueLicense(tx, auth.unitId, license.expires_at)
+    await revokeLicense(tx, license.code)
+    await revokeActiveTokensForLicense(tx, license.code)
+    await insertRebind(tx, {
+      id: randomUUID(),
+      unitId: auth.unitId,
+      installId: auth.installId,
+      reason,
+      oldCode: license.code,
+      newCode: code,
+      status: 'self-served',
+      monthKey: key,
+      monthCount: used + 1,
+      resolvedAt: at,
+    })
+    return code
+  })
+
+  await recordAudit(db, {
+    action: 'rebind-self-served',
+    target: auth.unitId,
+    detail: `旧授权码 ${license.code} → ${newCode}`,
+    ip: clientIp(c) ?? null,
+  })
+
+  return c.json({
+    ok: true as const,
+    data: { ok: true as const, code: newCode, expiresAt: license.expires_at, monthCount: used + 1 },
+  })
+})
+
+unitsRouter.post('/units/:unitId/public-key', requireUnitToken, async (c) => {
+  const unitId = c.req.param('unitId')
+  if (!UNIT_ID_PATTERN.test(unitId)) throw badRequest()
+  const auth = c.get('unitAuth')
+  assertUnitIdentity(c, auth, unitId)
+
+  const body = await readJsonObject(c)
+  const jwk = publicKeyJwkSchema.safeParse(body.publicKeyJwk)
+  if (!jwk.success) throw badRequest()
+
+  const db = c.get('db')
+  const license = await findLicenseByCode(db, auth.licenseCode)
+  if (license === undefined) throw unauthorized()
+  assertLicenseUsable(license)
+
+  const unit = await findUnitById(db, unitId)
+  if (unit === undefined) throw notFound()
+
+  // 同一公钥重复上报幂等（比较 kty/n/e 语义值，忽略 JSON 字段顺序）
+  if (unit.public_key_jwk !== null) {
+    const current = publicKeyJwkSchema.safeParse(JSON.parse(unit.public_key_jwk))
+    if (
+      current.success &&
+      current.data.kty === jwk.data.kty &&
+      current.data.n === jwk.data.n &&
+      current.data.e === jwk.data.e
+    ) {
+      return c.json({ ok: true as const, data: { ok: true as const } })
+    }
+  }
+
+  await updateUnitPublicKey(db, unitId, JSON.stringify(body.publicKeyJwk))
+  await recordAudit(db, {
+    action: 'unit-public-key-update',
+    target: unitId,
+    detail: unit.public_key_jwk === null ? '首次上报公钥' : '公钥变更',
+    ip: clientIp(c) ?? null,
+  })
+  return c.json({ ok: true as const, data: { ok: true as const } })
+})
