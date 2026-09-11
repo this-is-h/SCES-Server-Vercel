@@ -82,6 +82,13 @@ const tableData = computed<UnitTreeNode[]>(() => {
     .filter((n): n is UnitTreeNode => n !== null)
 })
 
+const expanded = ref<Record<string, boolean>>({})
+watch(tableData, (rows) => {
+  const next: Record<string, boolean> = {}
+  for (const r of rows) next[r.unitId] = true
+  expanded.value = next
+}, { immediate: true })
+
 const columns = [
   { accessorKey: 'unitName', header: '名称' },
   { accessorKey: 'unitId', header: '标识' },
@@ -230,7 +237,7 @@ definePageMeta({ title: '单位' })
       <UButton class="ml-auto" icon="i-lucide-plus" label="创建单位" @click="createOpen = true" />
     </div>
 
-    <UTable :data="tableData" :columns="columns" :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []">
+    <UTable v-model:expanded="expanded" :data="tableData" :columns="columns" :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []">
       <template #unitName-cell="{ row }">
         <span :class="row.getCanExpand() ? 'font-semibold' : 'pl-6'">{{ row.original.unitName }}</span>
         <UBadge
