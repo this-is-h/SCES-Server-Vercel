@@ -22,7 +22,7 @@
 | M1 单位与授权 | 接口 1–4：`authorize`、`public-key`、`rebind`、`license/status`；令牌只存哈希、换机月限 3 次、审计 | 已完成 |
 | M2 批次与申请 | 接口 5–13：批次创建/状态/下发、学生端注册与查询、批量状态、新一轮审核、公开单位树；严格限流已挂授权/注册/查询 | 已完成（63 用例通过） |
 | M2.5 全栈化 | 迁移 Nuxt 4 全栈框架：API（Hono 桥接）+ 管理后台同仓同源；生产已上线 `sces.thisish.cn` | 已完成 |
-| M3 后台 | 接口 14–21 + 管理后台前端（同仓、随 Vercel 部署） | 待建 |
+| M3 后台 | 接口 14–21 + 管理后台前端（Nuxt UI：单位/授权码、配置模板与配置查看、批次、换机、审计日志）；种子导入脚本 `import-seeds`；契约新增 `GET /admin/templates/{id}/versions/{version}/{revision}/config` | 已完成（95 用例通过，生产已验证） |
 | M4 加固 | 契约对齐测试收口、部署链路验证（需 Supabase/Vercel 凭证） | 待建 |
 
 `GET /api/v1/health` 已可用（返回 `architecture: "web"`：本实现与 SCES-Server `web/` 同属 Node + PostgreSQL 架构）。

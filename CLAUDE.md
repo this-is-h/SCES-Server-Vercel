@@ -19,4 +19,4 @@
 - 部署目标：Vercel（Nuxt 全栈 + Node runtime + Supabase 托管 Postgres）。
 
 ## 状态
-**Nuxt 4 全栈框架**（Vercel 官方支持）：API 与管理后台同仓同源，生产 `sces.thisish.cn`。入口 `server/api/[...path].ts` 把 `/api/**` 桥接给 Hono 应用（`server/utils/`，含路由/仓储/守卫/审计）；管理后台页面在 `app/pages/admin/`（SPA）。契约受控镜像（`contracts/`，`sync:contracts` + `check:contracts`）；建库迁移镜像（`supabase/migrations/`，`db:migrate`）。已实现接口 1–13（授权四接口、批次 5/6/11、申请 7/8/9/12/13、公开单位树 10），63 条用例覆盖（含数据主权红线断言、状态机单调性、限流）。待建：M3 后台（接口 14–21 + `app/pages/admin/` 界面）、M4 加固收尾。
+**Nuxt 4 全栈框架**（Vercel 官方支持）：API 与管理后台同仓同源，生产 `sces.thisish.cn`。入口 `server/api/[...path].ts` 把 `/api/**` 桥接给 Hono 应用（`server/utils/`，含路由/仓储/守卫/审计）；管理后台页面在 `app/pages/admin/`（SPA，**Nuxt UI v4**：`app.vue` 壳 UDashboardGroup + 侧栏；页面：单位/授权码、配置模板（含配置内容查看）、批次、换机记录、审计日志、登录/改密）。契约受控镜像（`contracts/`，`sync:contracts` + `check:contracts`）；建库迁移镜像（`supabase/migrations/`，`db:migrate`）；种子导入 `scripts/import-seeds.mjs`（幂等，`contracts/seed/*.json` → 单位+模板+授权码）。已实现接口 1–21 全量，95 条用例覆盖。待建：M4 加固收尾。
