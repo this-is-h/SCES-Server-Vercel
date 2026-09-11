@@ -98,12 +98,7 @@ const userMenuItems: DropdownMenuItem[][] = [
               <UDashboardSidebarCollapse />
             </template>
             <template #right>
-              <UButton
-                v-if="route.path === '/admin'"
-                icon="i-lucide-plus"
-                label="创建单位"
-                @click="openCreateUnit"
-              />
+              <!-- 页面级动作（如「创建单位」）由各页在顶部工具行渲染,navbar 仅保留标题 -->
             </template>
           </UDashboardNavbar>
         </template>

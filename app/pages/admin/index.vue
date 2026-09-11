@@ -126,11 +126,6 @@ async function doDelete() {
     deleting.value = false
   }
 }
-// navbar「创建单位」按钮点击计数（app.vue 转发）→ 打开本页 modal
-const createClick = useState<number>('navbar-create-click', () => 0)
-watch(createClick, () => {
-  if (createClick.value > 0) createOpen.value = true
-})
 
 async function createUnit() {
   creating.value = true
@@ -232,9 +227,10 @@ definePageMeta({ title: '单位' })
       <span class="text-sm text-muted">
         {{ units.filter(u => u.level === 2).length }} 个二级单位
       </span>
+      <UButton class="ml-auto" icon="i-lucide-plus" label="创建单位" @click="createOpen = true" />
     </div>
 
-    <UTable :data="tableData" :columns="columns" :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []" :expanded-options="{ getExpandedRowModel: undefined }">
+    <UTable :data="tableData" :columns="columns" :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []">
       <template #unitName-cell="{ row }">
         <span :class="row.getCanExpand() ? 'font-semibold' : 'pl-6'">{{ row.original.unitName }}</span>
         <UBadge
