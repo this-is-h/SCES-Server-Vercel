@@ -24,6 +24,34 @@ const FILE_MIRRORS = ['openapi.yaml', 'unit-config.schema.json', 'schema-web.sql
 const RUNTIME_MIRRORS = [{ from: 'unit-config.schema.json', to: 'server/utils/schemas/unit-config.schema.json' }]
 const SEED_MIRROR = 'seed'
 const MIGRATION_MIRROR = { from: 'schema-web.sql', to: 'supabase/migrations/0001_init.sql' }
+/** 契约详细文档：权威侧 build 生成 api-contract.md，本仓由其装配 docs/api.md（零改写）。 */
+const DOC_SOURCE = 'api-contract.md'
+const DOC_TARGET = 'docs/api.md'
+
+/** 从权威 api-contract.md 装配 docs/api.md：保留接口详情原文，替换总则/服务地址为本仓形态，补 Vercel 版差异说明。 */
+function buildApiDoc(contractMd) {
+  const start = contractMd.indexOf('## 通用约定')
+  const indexEnd = contractMd.indexOf('## 接口详情')
+  if (start < 0 || indexEnd < 0) throw new Error(`权威文档缺章节：${DOC_SOURCE}`)
+  const details = contractMd.slice(indexEnd) // '## 接口详情' 起（含公共数据结构、错误码约定）
+  const index = contractMd.slice(start, indexEnd) // 通用约定/鉴权/状态机/服务地址/接口索引
+
+  return `# API 接口文档（详细版）
+
+> **零改写装配**：接口详情逐字取自权威契约文档 SCES-Server/contracts/api-contract.md（由 openapi.yaml 生成，勿手改本文档；契约改动请改 openapi.yaml 后在 SCES-Server 执行 \`pnpm --filter @sces/contracts build\`，再本仓 \`pnpm sync:contracts\` 重新生成）。
+> 双仓同改约定：Vercel 版为当前主力开发线；发现契约问题（如字段冗余 unit_type、枚举口径变化）时，直接修改 SCES-Server/contracts 并随同一批变更同步到本仓，两个服务端实现随之对齐。
+
+## 本仓差异说明
+
+| 项 | 权威契约描述 | Vercel 版实际 |
+|----|--------------|---------------|
+| 服务地址 | http://127.0.0.1:3100（server/web）/ 8787（cloudflare） | 本地 \`http://localhost:3000\`；生产 \`https://sces.thisish.cn\` |
+| 架构标识 | \`architecture\` 返回 \`web\` / \`cloudflare\` | 健康检查固定返回 \`web\`（\`server/utils/constants.ts\`） |
+| 限流实现 | 平台差异，契约不断言 | 内存固定窗口 60s/30 次，键 (path, IP)：\`POST /authorize\`、\`POST /admin/auth/login\`、\`POST /applies/:id/register\`、\`GET /applies/:id\`（\`server/utils/app.ts\`） |
+| 令牌签发 | — | accessToken HS256 15 分钟（\`ACCESS_TOKEN_TTL_MS\`）；refreshToken 30 天仅存哈希 |
+
+${index}${details}`
+}
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 
@@ -48,11 +76,6 @@ function collectTargets() {
 }
 
 function main() {
-  if (!existsSync(source)) {
-    console.error(`权威源不存在：${source}`)
-    console.error('用 SCES_CONTRACTS_SOURCE 指向 SCES-Server/contracts 后重试。')
-    process.exit(1)
-  }
 
   const targets = collectTargets()
   const manifest = {}
@@ -81,7 +104,15 @@ function main() {
     `${JSON.stringify(manifest, null, 2)}\n`,
   )
 
-  console.log(`已同步 ${targets.size} 个文件：${relative(root, source)} -> contracts/ 与 supabase/migrations/`)
+  // 契约详细文档装配：docs/api.md（零改写取自权威 api-contract.md）
+  const contractMdPath = join(source, DOC_SOURCE)
+  if (!existsSync(contractMdPath)) {
+    console.error(`权威源缺少文件：${relative(root, contractMdPath)}（先在 SCES-Server 执行 contracts build）`)
+    process.exit(1)
+  }
+  writeFileSync(join(root, DOC_TARGET), buildApiDoc(readFileSync(contractMdPath, 'utf8')))
+
+  console.log(`已同步 ${targets.size} 个镜像文件 + ${DOC_TARGET}：${relative(root, source)} -> contracts/ 与 supabase/migrations/`)
 }
 
 main()

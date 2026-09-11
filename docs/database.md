@@ -1,9 +1,10 @@
 # 数据库说明
 
-> DDL 唯一权威：SCES-Server `contracts/schema-web.sql`。本仓 `supabase/migrations/0001_init.sql` 是其**逐字节镜像**（`sync:contracts` 同步，勿手改）。测试（PGlite）与生产（Supabase）跑同一份 DDL。
+> **双仓协同**：契约 DDL 权威在 SCES-Server `contracts/schema-web.sql`（当前主力开发线为本仓，契约问题随本仓批次一并修改后 `pnpm sync:contracts` 同步）。本仓 `supabase/migrations/0001_init.sql` 为其逐字节镜像，由脚本把关一致性（`check:contracts`）。测试（PGlite）与生产（Supabase）跑同一份 DDL。
+>
+> **unit_type 评审结论**：`unit.unit_type`（college/department/other）三仓均无行为分支，纯展示字段；现阶段保留（种子与契约均有值），确认无展示需求后可随契约批次移除。
 >
 > 通用约定：主键 `TEXT`（uuid 或语义 id）；时间戳 `BIGINT` epoch 毫秒；JSON 一律存 `TEXT`（应用层解析，避免方言依赖）；枚举用 `CHECK` 约束。
-
 ## 目录
 
 - [表关系总览](#表关系总览)
@@ -63,8 +64,7 @@ erDiagram
 |----|------|------|
 | id | TEXT PK | camelCase 语义 id（如 `nxu`、`nxuLx`） |
 | name | TEXT | 显示名 |
-| unit_type | TEXT CHECK | `college` / `department` / `other`（默认落 `other`） |
-| parent_id | TEXT FK→unit **RESTRICT** | 一级为 NULL；有下级的一级不可删（RESTRICT） |
+| unit_type | TEXT CHECK | `college` / `department` / `other`（默认落 `other`）。**评审结论**：三仓均无行为分支（无 `unitType` 比较/条件），纯展示字段；暂保留，若确认无展示需求可随契约批次移除 |
 | level | SMALLINT CHECK | 1 / 2 |
 | public_key_jwk | TEXT NULL | 单位公钥 JWK（JSON 存 TEXT）；**私钥永不入库** |
 | status | TEXT CHECK | `active` / `disabled` |

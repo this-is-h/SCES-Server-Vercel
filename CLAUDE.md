@@ -14,7 +14,7 @@
 格式：`<type>(<scope>): <subject>`；type ∈ feat/fix/docs/style/refactor/perf/test/chore/build/ci/revert；scope 可选小写（web/api/contracts/db/admin/schema/openapi/docs/build/ci/deps）；subject ≤50 字符、小写祈使句、无句号。
 
 ### 红线
-- 接口唯一权威 = SCES-Server `contracts/`（OpenAPI 3.1 + unit-config.schema.json）；本仓不重定义接口，契约改动先走 SCES-Server 的 `build` + `verify`。
+- 契约唯一权威 = SCES-Server `contracts/`（OpenAPI 3.1 + unit-config.schema.json）；**双仓同批共改**：契约问题（如 `unit_type` 去留）直接在 SCES-Server 契约改（`build` + `verify`），同批 `pnpm sync:contracts` 落到本仓（`docs/api.md` 随之再生成），实现/测试对齐后两仓一起提交。
 - 数据主权：服务端不存分数明细/证明材料/私钥；`applyId`/`unitToken` 只存 SHA-256 哈希。
 - 部署目标：Vercel（Nuxt 全栈 + Node runtime + Supabase 托管 Postgres）。
 

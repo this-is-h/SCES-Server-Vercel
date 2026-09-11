@@ -4,7 +4,9 @@
 
 > 契约唯一权威在 SCES-Server 仓库（`contracts/`：OpenAPI 3.1 + unit-config schema + 种子 + DDL）。本仓 `contracts/` 是**受控镜像**（脚本同步、勿手改），两套服务端实现逐字段对齐契约，不重复定义接口。
 
-## 📚 文档
+**双仓协同**：Vercel 仓为当前主力开发线；SCES-Server 为契约权威。契约改动请改 SCES-Server/contracts/openapi.yaml，再在 Vercel 仓执行 `pnpm sync:contracts` 重新生成 docs/api.md。
+
+**接口同步**：SCES-Server 的 `build` + `verify` → 本仓 `pnpm sync:contracts`；文档 `/docs/` 随契约批量更新。
 
 完整文档在 [docs/](./docs/index.md)：
 
@@ -69,5 +71,5 @@ pnpm db:migrate        # 把 supabase/migrations/*.sql 执行到 DATABASE_URL（
 
 - 简化版 Git Flow + Conventional Commits（husky/commitlint 强制）；分支模型与提交规范见 `CONTRIBUTING.md`。
 - `main` 绑定 Vercel 生产部署，禁止直推；日常开发在 `develop`，任务从 develop 拉 `feature/*`。
-- 契约改动流程：先改 SCES-Server `contracts`（`build` + `verify`）→ 本仓 `pnpm sync:contracts` → 实现与测试对齐；`pnpm check:contracts` 会把关镜像未被手改、且未落后于权威源。
+- 契约改动流程（双仓同批共改）：契约与实现一批变更——先在 SCES-Server 改 `contracts`（`build` + `verify`）→ 本仓 `pnpm sync:contracts`（`docs/api.md` 随之再生成）→ 本仓实现/测试对齐 → 两仓同批提交；`pnpm check:contracts` 把关镜像与权威源一致。契约层面的问题（如 `unit_type` 字段去留）在 SCES-Server 契约里改，随同一批变更落到本仓。
 - 数据主权红线：`applyId` / `unitToken` 只存 SHA-256 哈希；不存分数明细、证明材料、私钥。

@@ -50,6 +50,8 @@ pnpm exec nuxt dev        # http://localhost:3000（后台 /admin，API /api/v1/
 
 ## 契约同步流程
 
+> **双仓协同**：Vercel 仓为当前主力开发线；SCES-Server 为契约权威。契约改动请改 SCES-Server/contracts/openapi.yaml，再在 Vercel 仓执行 `pnpm sync:contracts` 重新生成 docs/api.md。
+
 接口/DDL/schema 的唯一权威在 **SCES-Server 仓库 `contracts/`**。改动流程：
 
 ```
@@ -57,12 +59,12 @@ pnpm exec nuxt dev        # http://localhost:3000（后台 /admin，API /api/v1/
    → pnpm --filter @sces/contracts build   # 生成 api-contract.md / 种子
    → pnpm --filter @sces/contracts verify  # 四链校验（种子/OpenAPI/DDL/文档）
    → 提交合并到 SCES-Server develop
-2. 本仓：pnpm sync:contracts                # 同步镜像（contracts/ + supabase/migrations/ + 运行时 schema）
-3. 本仓：实现/调整 routes + repos + 测试
+2. Vercel 仓：pnpm sync:contracts          # 同步镜像（contracts/ + supabase/migrations/ + 运行时 schema）
+3. Vercel 仓：实现/调整 routes + repos + 测试
 4. pnpm verify 全绿后提交
 ```
 
-`pnpm check:contracts` 逐字节比对镜像与 manifest——**手改镜像会被拦下**；落后权威源同样报错。
+`pnpm check:contracts` 逐字节比对镜像与 manifest——**手改镜像会被拦下**；落后权威源同样报错（改了 SCES-Server 却忘了 sync 属同类问题，同批提交即可避免）。
 
 新增端点三件事（参考 `DELETE /admin/units/{unitId}` 的完整示例）：
 
