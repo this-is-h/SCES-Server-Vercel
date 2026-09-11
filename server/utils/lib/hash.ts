@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto'
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 
 /** 契约 LicenseCode：大写字母数字，4 组 × 4 位。 */
 export const LICENSE_CODE_PATTERN = /^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/
@@ -29,4 +29,27 @@ export function randomToken(): string {
 export function generateLicenseCode(): string {
   const chars = Array.from({ length: 16 }, () => LICENSE_ALPHABET.charAt(randomInt(LICENSE_ALPHABET.length)))
   return `${chars.slice(0, 4).join('')}-${chars.slice(4, 8).join('')}-${chars.slice(8, 12).join('')}-${chars.slice(12, 16).join('')}`
+}
+
+/** 密码哈希（scrypt，web 架构约定 §7.1）：格式 scrypt$N$r$p$salt$hash。 */
+export function hashPassword(password: string): string {
+  const N = 16_384
+  const r = 8
+  const p = 1
+  const salt = randomBytes(16)
+  const derived = scryptSync(password, salt, 64, { N, r, p })
+  return `scrypt$${N}$${r}$${p}$${salt.toString('base64')}$${derived.toString('base64')}`
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  const parts = stored.split('$')
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false
+  const N = Number.parseInt(parts[1] ?? '', 10)
+  const r = Number.parseInt(parts[2] ?? '', 10)
+  const p = Number.parseInt(parts[3] ?? '', 10)
+  if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) return false
+  const salt = Buffer.from(parts[4] ?? '', 'base64')
+  const expected = Buffer.from(parts[5] ?? '', 'base64')
+  const derived = scryptSync(password, salt, expected.length, { N, r, p })
+  return derived.length === expected.length && timingSafeEqual(derived, expected)
 }

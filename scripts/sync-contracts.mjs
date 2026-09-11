@@ -20,6 +20,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = resolve(process.env.SCES_CONTRACTS_SOURCE ?? join(root, '..', 'SCES-Server', 'contracts'))
 
 const FILE_MIRRORS = ['openapi.yaml', 'unit-config.schema.json', 'schema-web.sql', 'schema-d1.sql']
+/** 运行时镜像：unit-config schema 需要被 server/ 打包（Nitro 不打 repo 内 contracts/）。 */
+const RUNTIME_MIRRORS = [{ from: 'unit-config.schema.json', to: 'server/utils/schemas/unit-config.schema.json' }]
 const SEED_MIRROR = 'seed'
 const MIGRATION_MIRROR = { from: 'schema-web.sql', to: 'supabase/migrations/0001_init.sql' }
 
@@ -37,6 +39,9 @@ function collectTargets() {
   for (const name of readdirSync(seedDir)) {
     if (!name.endsWith('.json')) continue
     targets.set(join('contracts', SEED_MIRROR, name), join(seedDir, name))
+  }
+  for (const mirror of RUNTIME_MIRRORS) {
+    targets.set(mirror.to, join(source, mirror.from))
   }
   targets.set(MIGRATION_MIRROR.to, join(source, MIGRATION_MIRROR.from))
   return targets

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../server/utils/app.js'
+import { createHonoApp } from '../server/utils/app.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 import { TEST_JWK, activateUnit, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
 import { readData, readError } from './helpers/http.js'
@@ -24,7 +24,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('首次上报公钥：落库并记审计', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     const res = await app.request(publicKeyUrl(seeded.unitId), {
@@ -44,7 +44,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('同一公钥重复上报幂等：不产生第二条审计', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     const init = {
       method: 'POST',
@@ -59,7 +59,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('换公钥覆盖旧值并追加审计', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     await app.request(publicKeyUrl(seeded.unitId), {
@@ -86,7 +86,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('路径单位与令牌不一致 → 403 授权校验未通过', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     const res = await app.request(publicKeyUrl('otherUnit'), {
@@ -100,7 +100,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('缺令牌 → 401', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const res = await createApp({ db: ctx.db }).request(publicKeyUrl(seeded.unitId), {
+    const res = await createHonoApp({ db: ctx.db }).request(publicKeyUrl(seeded.unitId), {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-Unit-Id': seeded.unitId, 'X-Install-Id': 'install-test-1' },
       body: JSON.stringify({ publicKeyJwk: TEST_JWK }),
@@ -110,7 +110,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('JWK 缺字段 → 400', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     const res = await app.request(publicKeyUrl(seeded.unitId), {
@@ -123,7 +123,7 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
 
   it('授权码作废后上报 → 403 授权码已作废', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     await ctx.db.query(`UPDATE license SET status = 'revoked' WHERE code = $1`, [seeded.code])

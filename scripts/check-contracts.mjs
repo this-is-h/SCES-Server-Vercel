@@ -46,11 +46,15 @@ function main() {
       continue
     }
     if (sourceAvailable) {
-      const srcFile = join(source, relPath.startsWith('contracts/')
-        ? relPath.slice('contracts/'.length)
-        : relPath === 'supabase/migrations/0001_init.sql'
-          ? 'schema-web.sql'
-          : '')
+      const sourceName =
+        relPath.startsWith('contracts/')
+          ? relPath.slice('contracts/'.length)
+          : relPath === 'supabase/migrations/0001_init.sql'
+            ? 'schema-web.sql'
+            : relPath === 'server/utils/schemas/unit-config.schema.json'
+              ? 'unit-config.schema.json'
+              : undefined
+      const srcFile = sourceName === undefined ? '' : join(source, sourceName)
       if (srcFile && existsSync(srcFile)) {
         const srcSha = sha256(readFileSync(srcFile))
         if (srcSha !== expectedSha) {

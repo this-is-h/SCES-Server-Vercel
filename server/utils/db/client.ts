@@ -36,6 +36,17 @@ export function getDb(): Db {
       prepare: false,
       idle_timeout: 20,
       ssl: 'require',
+      // 契约 EpochMs 为 number；postgres.js 默认把 BIGINT 序列化为 string，此处转回 number
+      // （epoch ms ≈ 1.8e12，远在 Number.MAX_SAFE_INTEGER 内）。测试用 PGlite 本身返回 number，
+      // 两驱动行为在此对齐。
+      types: {
+        bigint: {
+          to: 20,
+          from: [20],
+          serialize: (value: bigint | number) => String(value),
+          parse: (value: string) => Number(value),
+        },
+      },
     }),
   )
   return instance

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createApp } from '../server/utils/app.js'
+import { createHonoApp } from '../server/utils/app.js'
 import { unusedDb } from './helpers/stub-db.js'
 
-const app = createApp({ db: unusedDb })
+const app = createHonoApp({ db: unusedDb })
 
 describe('GET /api/v1/health', () => {
   it('返回统一 ok 包裹与 web 架构标识', async () => {

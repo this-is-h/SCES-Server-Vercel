@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../server/utils/app.js'
+import { createHonoApp } from '../server/utils/app.js'
 import { LICENSE_CODE_PATTERN } from '../server/utils/lib/hash.js'
 import { monthKey } from '../server/utils/lib/time.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
@@ -36,7 +36,7 @@ describe('POST /api/v1/units/rebind', () => {
 
   it('自助换机：签发新码、作废旧码与旧令牌、记 self-served', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     const res = await app.request(rebindUrl, {
@@ -70,7 +70,7 @@ describe('POST /api/v1/units/rebind', () => {
 
   it('本月第 4 次换机 → 403 超限并留 pending 记录（不换机）', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     await seedPastRebinds(seeded.unitId, 3)
 

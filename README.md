@@ -8,7 +8,8 @@
 
 | 层 | 选型 | 说明 |
 |----|------|------|
-| API | Vercel Functions（Node runtime） | 单 catch-all 函数 `api/[[...route]].ts` + Hono 内部分发；规避 Hobby 函数数量限制、共享冷启动面 |
+| 框架 | **Nuxt 4**（Vercel 官方支持 Full-stack framework） | API 与管理后台同仓同源部署；页面 SPA 模式（`ssr: false`），按需可经 `routeRules` 开 SSR |
+| API | Nitro catch-all（`server/api/[...path].ts`） | `toWebRequest()` 桥接 Hono 应用分发 `/api/v1/**`；契约行为不变 |
 | 数据库 | Supabase Postgres（免费版） | Supavisor **事务池**连接串（端口 6543），`prepare: false`；DDL 见 `supabase/migrations/`（`schema-web.sql` 逐字节镜像） |
 | 文件存储 | 不使用 | 契约无文件接口；数据主权红线：服务端不存分数明细、证明材料、任何私钥 |
 | 密钥面 | 仅 `DATABASE_URL` + `TOKEN_SIGNING_SECRET` | 不走 PostgREST/anon key，DB 访问用池化连接串 |
@@ -18,8 +19,9 @@
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
 | M0 骨架 | health 探活、契约镜像与比对、迁移镜像、verify 门禁 | 已完成 |
-| M1 单位与授权 | 接口 1–4：`authorize`、`public-key`、`rebind`、`license/status`；令牌只存哈希、换机月限 3 次、审计 | 已完成（30 用例通过） |
+| M1 单位与授权 | 接口 1–4：`authorize`、`public-key`、`rebind`、`license/status`；令牌只存哈希、换机月限 3 次、审计 | 已完成 |
 | M2 批次与申请 | 接口 5–13：批次创建/状态/下发、学生端注册与查询、批量状态、新一轮审核、公开单位树；严格限流已挂授权/注册/查询 | 已完成（63 用例通过） |
+| M2.5 全栈化 | 迁移 Nuxt 4 全栈框架：API（Hono 桥接）+ 管理后台同仓同源；生产已上线 `sces.thisish.cn` | 已完成 |
 | M3 后台 | 接口 14–21 + 管理后台前端（同仓、随 Vercel 部署） | 待建 |
 | M4 加固 | 契约对齐测试收口、部署链路验证（需 Supabase/Vercel 凭证） | 待建 |
 
@@ -29,13 +31,12 @@
 
 | 路径 | 职责 |
 |------|------|
-| `api/[[...route]].ts` | Vercel 唯一入口（nodejs22.x，Hono `handle`） |
-| `src/app.ts`、`src/routes/` | 应用装配与路由（统一包裹、错误映射、鉴权中间件） |
-| `src/db/`、`src/repos/` | SQL 抽象（运行时 postgres.js / 测试 PGlite）与仓储层 |
-| `src/lib/`、`src/http/` | 哈希令牌、错误、请求解析、鉴权守卫、审计 |
+| `nuxt.config.ts`、`app/` | Nuxt 配置与管理后台页面（SPA，`app/pages/admin/`） |
+| `server/api/[...path].ts` | Nitro catch-all：桥接 `/api/**` 到 Hono 应用 |
+| `server/utils/` | Hono 业务层：`app.ts`/`routes/`（装配与路由）、`db/`+`repos/`（SQL 抽象与仓储）、`lib/`+`http/`（哈希、错误、鉴权守卫、审计）、`schemas/`（zod） |
 | `contracts/` | 契约受控镜像（openapi/unit-config schema/种子/双方言 DDL，勿手改） |
 | `supabase/migrations/` | 建库 DDL 的 Supabase 载体（`schema-web.sql` 逐字节副本） |
-| `scripts/` | `sync-contracts` / `check-contracts` / `apply-migrations` |
+| `scripts/` | `sync-contracts` / `check-contracts` / `apply-migrations` / `vercel-cli`（token 包装） |
 | `tests/` | vitest：PGlite 跑同一份 DDL 的集成用例 + 契约红线断言 |
 
 ## 命令
@@ -48,7 +49,7 @@ pnpm sync:contracts    # 从 SCES-Server/contracts 同步镜像（SCES_CONTRACTS
 pnpm db:migrate        # 把 supabase/migrations/*.sql 执行到 DATABASE_URL（幂等，可重放）
 ```
 
-本地开发：`vercel dev`（Node runtime）；环境变量见 `.env.example`（`DATABASE_URL` 用 **Transaction pooler** 连接串）。
+本地开发：`pnpm exec nuxt dev`（管理后台 http://localhost:3000/admin，API 同源 `/api/v1/**`）；环境变量见 `.env.example`（`DATABASE_URL` 用 **Transaction pooler** 连接串）。
 
 ## 约定（新会话必读）
 

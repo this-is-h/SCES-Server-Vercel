@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Hono } from 'hono'
-import { createApp } from '../server/utils/app.js'
+import { createHonoApp } from '../server/utils/app.js'
 import type { AppEnv } from '../server/utils/http/env.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 import { activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
@@ -43,7 +43,7 @@ describe('POST /api/v1/batches（接口 5）', () => {
   })
 
   async function createBatch(token: string, unitId: string, overrides: Record<string, unknown> = {}) {
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const body = createPayload(overrides)
     const res = await app.request('http://internal/api/v1/batches', {
       method: 'POST',
@@ -55,7 +55,7 @@ describe('POST /api/v1/batches（接口 5）', () => {
 
   it('登记成功：返回 batchId/status/createdAt 并落库为 draft', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     const batchId = nextBatchId()
 
@@ -75,7 +75,7 @@ describe('POST /api/v1/batches（接口 5）', () => {
 
   it('同 batchId 重复上报幂等：返回现有记录不重复插入', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const token = await activateUnit(createApp({ db: ctx.db }), seeded.code)
+    const token = await activateUnit(createHonoApp({ db: ctx.db }), seeded.code)
     const batchId = nextBatchId()
     const init = createPayload({ batchId })
 
@@ -91,7 +91,7 @@ describe('POST /api/v1/batches（接口 5）', () => {
 
   it('正式批次同单位同学年学期重复 → 409', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const token = await activateUnit(createApp({ db: ctx.db }), seeded.code)
+    const token = await activateUnit(createHonoApp({ db: ctx.db }), seeded.code)
 
     await createBatch(token, seeded.unitId)
     const { res } = await createBatch(token, seeded.unitId, { batchId: nextBatchId() })
@@ -101,7 +101,7 @@ describe('POST /api/v1/batches（接口 5）', () => {
 
   it('测试批次不受正式批次唯一约束', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const token = await activateUnit(createApp({ db: ctx.db }), seeded.code)
+    const token = await activateUnit(createHonoApp({ db: ctx.db }), seeded.code)
 
     await createBatch(token, seeded.unitId, { isTest: true })
     const { res } = await createBatch(token, seeded.unitId, { isTest: true, batchId: nextBatchId() })
@@ -110,14 +110,14 @@ describe('POST /api/v1/batches（接口 5）', () => {
 
   it('引用不存在的配置模板版本 → 400', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const token = await activateUnit(createApp({ db: ctx.db }), seeded.code)
+    const token = await activateUnit(createHonoApp({ db: ctx.db }), seeded.code)
     const { res } = await createBatch(token, seeded.unitId, { configTemplateVersion: 99 })
     expect(res.status).toBe(400)
   })
 
   it('参数非法（calcMode 与 calcConfig 判别不一致）→ 400', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const token = await activateUnit(createApp({ db: ctx.db }), seeded.code)
+    const token = await activateUnit(createHonoApp({ db: ctx.db }), seeded.code)
     const { res } = await createBatch(token, seeded.unitId, {
       calcMode: 'formula',
       calcConfig: { calcMode: 'weighted', dyfWeight: 0.3, courseWeight: 0.7 },
@@ -127,7 +127,7 @@ describe('POST /api/v1/batches（接口 5）', () => {
 
   it('缺令牌 → 401', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const res = await createApp({ db: ctx.db }).request('http://internal/api/v1/batches', {
+    const res = await createHonoApp({ db: ctx.db }).request('http://internal/api/v1/batches', {
       method: 'POST',
       headers: unitHeaders('bad-token-bad-token-bad-token', seeded.unitId),
       body: JSON.stringify({ batch: createPayload() }),
@@ -149,7 +149,7 @@ describe('POST /api/v1/batches/{batchId}/status（接口 6）', () => {
 
   async function makeActiveBatch() {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     const batchId = nextBatchId()
     await app.request('http://internal/api/v1/batches', {
@@ -220,7 +220,7 @@ describe('GET /api/v1/batches/active（接口 11）', () => {
 
   async function makeBatch(status: string, overrides: Record<string, unknown> = {}) {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     const batchId = nextBatchId()
     await app.request('http://internal/api/v1/batches', {
@@ -249,7 +249,7 @@ describe('GET /api/v1/batches/active（接口 11）', () => {
 
   it('返回活跃批次及其配置模板快照', async () => {
     const { seeded, batchId } = await makeBatch('active')
-    const res = await createApp({ db: ctx.db }).request(
+    const res = await createHonoApp({ db: ctx.db }).request(
       `http://internal/api/v1/batches/active?unitId=${seeded.unitId}`,
     )
     expect(res.status).toBe(200)
@@ -261,7 +261,7 @@ describe('GET /api/v1/batches/active（接口 11）', () => {
 
   it('无活跃批次 → batch: null 且不含 configTemplate', async () => {
     const { seeded } = await makeBatch('draft')
-    const res = await createApp({ db: ctx.db }).request(
+    const res = await createHonoApp({ db: ctx.db }).request(
       `http://internal/api/v1/batches/active?unitId=${seeded.unitId}`,
     )
     expect(res.status).toBe(200)
@@ -270,7 +270,7 @@ describe('GET /api/v1/batches/active（接口 11）', () => {
 
   it('已过申请截止的活跃批次不下发', async () => {
     const { seeded } = await makeBatch('active', { applyEndAt: Date.now() - 1000 })
-    const res = await createApp({ db: ctx.db }).request(
+    const res = await createHonoApp({ db: ctx.db }).request(
       `http://internal/api/v1/batches/active?unitId=${seeded.unitId}`,
     )
     expect((await readData<{ batch: null }>(res)).batch).toBeNull()
@@ -278,7 +278,7 @@ describe('GET /api/v1/batches/active（接口 11）', () => {
 
   it('正式批次优先于测试批次', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
 
     const testId = nextBatchId()
@@ -304,7 +304,7 @@ describe('GET /api/v1/batches/active（接口 11）', () => {
   })
 
   it('单位不存在 → 404 单位不存在', async () => {
-    const res = await createApp({ db: ctx.db }).request(
+    const res = await createHonoApp({ db: ctx.db }).request(
       'http://internal/api/v1/batches/active?unitId=noSuchUnit',
     )
     expect(res.status).toBe(404)
