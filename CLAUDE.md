@@ -19,4 +19,5 @@
 - 部署目标：Vercel（Nuxt 全栈 + Node runtime + Supabase 托管 Postgres）。
 
 ## 状态
-**Nuxt 4 全栈框架**（Vercel 官方支持）：API 与管理后台同仓同源，生产 `sces.thisish.cn`。入口 `server/api/[...path].ts` 把 `/api/**` 桥接给 Hono 应用（`server/utils/`，含路由/仓储/守卫/审计）；管理后台页面在 `app/pages/admin/`（SPA，**Nuxt UI v4**：`app.vue` 壳 UDashboardGroup + 侧栏；页面：单位/授权码、配置模板（含配置内容查看）、批次、换机记录、审计日志、登录/改密）。契约受控镜像（`contracts/`，`sync:contracts` + `check:contracts`）；建库迁移镜像（`supabase/migrations/`，`db:migrate`）；种子导入 `scripts/import-seeds.mjs`（幂等，`contracts/seed/*.json` → 单位+模板+授权码）。已实现接口 1–21 全量，95 条用例覆盖。待建：M4 加固收尾。
+**文档中心**：`docs/index.md`（API / 架构 / 数据库 / 开发 / 部署五册，新会话查文档先看这里）。
+**Nuxt 4 全栈框架**（Vercel 官方支持）：API 与管理后台同仓同源，生产 `sces.thisish.cn`。入口 `server/api/[...path].ts` 把 `/api/**` 桥接给 Hono 应用（`server/utils/`，含路由/仓储/守卫/审计）；管理后台页面在 `app/pages/admin/`（SPA，**Nuxt UI v4**：`app.vue` 壳 UDashboardGroup + 侧栏；页面：单位/授权码、配置模板（含配置内容查看）、批次、换机记录、审计日志、登录/改密）。契约受控镜像（`contracts/`，`sync:contracts` + `check:contracts`）；建库迁移镜像（`supabase/migrations/`，`db:migrate`）；种子导入 `scripts/import-seeds.mjs`（幂等，`contracts/seed/*.json` → 单位+模板+授权码）。已实现接口 1–21 全量，96 条用例覆盖。待建：M4 加固收尾。
