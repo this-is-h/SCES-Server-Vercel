@@ -6,5 +6,6 @@
   "contracts/seed/lixing-shuyuan.json": "63bf60c66ca5afcf9ecdd5cab71108c7c71c7b152707f0c583cded3c23ef8d5d",
   "contracts/seed/test-1.json": "e82c29c4895a7a4b2e00bbf7de39f42217c04c325786260d5406b1cf59601574",
   "contracts/seed/test-2.json": "8e898c88552646cf4084564bc462f5960819f5ba0ab50d0015a1f2c0eb4c7652",
+  "server/utils/schemas/unit-config.schema.json": "15dc5ba27493d80a7e2a2fb8fa34e8bb37a7405c7ab0749b4273f483a1bd82f0",
   "supabase/migrations/0001_init.sql": "8002039592cef360df18db31ae74be6bc5dcaf4a9a4c5567fee6dec45220c081"
 }

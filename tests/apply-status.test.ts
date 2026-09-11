@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Hono } from 'hono'
-import { createApp } from '../server/utils/app.js'
+import { createHonoApp } from '../server/utils/app.js'
 import type { AppEnv } from '../server/utils/http/env.js'
 import { sha256Hex } from '../server/utils/lib/hash.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
@@ -32,7 +32,7 @@ type BulkData = { succeeded: number; failed: number; results: Array<Record & { o
 /** 造一个 active 批次并返回激活令牌（接口 5→6 链路复用）。 */
 async function makeActiveBatch(db: TestDb): Promise<{ app: App; token: string; unitId: string; batchId: string }> {
   const seeded = await seedTestUnit(db.db)
-  const app = createApp({ db: db.db })
+  const app = createHonoApp({ db: db.db })
   const token = await activateUnit(app, seeded.code)
 
   const batchId = nextBatchId()
@@ -116,7 +116,7 @@ describe('POST /api/v1/applies/{applyId}/register（接口 12）', () => {
 
   it('draft 批次不可注册 → 403 批次未开放申请', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     const batchId = nextBatchId()
     await app.request('http://internal/api/v1/batches', {
@@ -296,7 +296,7 @@ describe('POST /api/v1/applies/{applyId}/review-rounds（接口 9）', () => {
 
   async function confirmedApply() {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const token = await activateUnit(app, seeded.code)
     const batchId = nextBatchId()
     await app.request('http://internal/api/v1/batches', {
@@ -348,7 +348,7 @@ describe('POST /api/v1/applies/{applyId}/review-rounds（接口 9）', () => {
 
   it('一级单位令牌可发起：round+1、reviewing，沿用版本信息', async () => {
     const levelOne = await seedLevelOneUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const levelOneToken = await activateUnit(app, levelOne.code)
     const { batchId, applyId } = await confirmedApply()
 
@@ -382,7 +382,7 @@ describe('POST /api/v1/applies/{applyId}/review-rounds（接口 9）', () => {
 
   it('未确认轮次 → 409 当前轮次尚未确认', async () => {
     const levelOne = await seedLevelOneUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const levelOneToken = await activateUnit(app, levelOne.code)
     const { batchId } = await makeActiveBatch(ctx)
 
@@ -435,7 +435,7 @@ describe('GET /api/v1/applies/{applyId}（接口 13）', () => {
   })
 
   it('applyId 非 UUID → 400', async () => {
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const res = await app.request('http://internal/api/v1/applies/not-a-uuid')
     expect(res.status).toBe(400)
   })
@@ -498,7 +498,7 @@ describe('POST /api/v1/batches/{batchId}/apply-statuses（接口 7）', () => {
 
   it('startNewRound：confirmed 记录跨轮进入 reviewing；未确认项失败不回滚', async () => {
     const levelOne = await seedLevelOneUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
     const levelOneToken = await activateUnit(app, levelOne.code)
     const seeded = await seedTestUnit(ctx.db)
     const token = await activateUnit(app, seeded.code)

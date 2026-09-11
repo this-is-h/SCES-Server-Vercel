@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../server/utils/app.js'
+import { createHonoApp } from '../server/utils/app.js'
 import { sha256Hex } from '../server/utils/lib/hash.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 import { TEST_INSTALL_ID, activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
@@ -32,7 +32,7 @@ describe('POST /api/v1/authorize', () => {
   })
 
   const request = (headers: Record<string, string>, body: unknown) =>
-    createApp({ db: ctx.db }).request('http://internal/api/v1/authorize', {
+    createHonoApp({ db: ctx.db }).request('http://internal/api/v1/authorize', {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -73,7 +73,7 @@ describe('POST /api/v1/authorize', () => {
 
   it('同一安装实例重复激活：旧令牌立即失效', async () => {
     const seeded = await seedTestUnit(ctx.db)
-    const app = createApp({ db: ctx.db })
+    const app = createHonoApp({ db: ctx.db })
 
     const first = await activateUnit(app, seeded.code)
     const second = await activateUnit(app, seeded.code)

@@ -13,5 +13,12 @@ export interface AppEnv {
   Variables: {
     db: Db
     unitAuth: UnitAuthContext
+    /** 后台认证上下文（由 requireAdminToken 解析并校验）。 */
+    adminAuth: AdminAuthContext
   }
+}
+
+export interface AdminAuthContext {
+  adminUserId: string
+  username: string
 }

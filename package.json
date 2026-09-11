@@ -19,6 +19,7 @@
     "verify": "pnpm type-check && pnpm check:contracts && pnpm test"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "h3": "^1.15.11",
     "hono": "^4.9.0",
     "nuxt": "^4.5.2",
