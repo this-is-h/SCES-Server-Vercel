@@ -59,34 +59,56 @@ async function loadTemplates() {
   templates.value = data.data.templates
 }
 
-// ---- 表格数据：一级分组行内嵌二级 subRows，含搜索过滤
-interface UnitTreeNode extends UnitSummary {
-  subRows?: UnitTreeNode[]
+// ---- 扁平行数组：一级行 + 折叠状态控制二级行显示。不使用 TanStack expandable（避免占位空行）。
+interface FlatRow {
+  unitId: string
+  unitName: string
+  level: number
+  parentUnitId: string | null
+  isParent: boolean
+  childCount: number
 }
 
-const tableData = computed<UnitTreeNode[]>(() => {
+const collapsed = ref<Record<string, boolean>>({})
+
+function toggleCollapse(unitId: string) {
+  collapsed.value[unitId] = !collapsed.value[unitId]
+}
+
+const flatRows = computed<FlatRow[]>(() => {
   const keyword = search.value.trim().toLowerCase()
   const match = (u: UnitSummary) =>
     keyword === '' || u.unitName.toLowerCase().includes(keyword) || u.unitId.toLowerCase().includes(keyword)
-  const level2 = units.value.filter(u => u.level === 2)
   const level1 = units.value.filter(u => u.level === 1)
-  return level1
-    .map((parent) => {
-      const children = level2.filter(u => u.parentUnitId === parent.unitId && match(u))
-      const selfMatch = match(parent)
-      if (keyword !== '' && !selfMatch && children.length === 0) return null
-      return { ...parent, subRows: children }
+  const level2 = units.value.filter(u => u.level === 2)
+  const rows: FlatRow[] = []
+  for (const parent of level1) {
+    const children = level2.filter(u => u.parentUnitId === parent.unitId && match(u))
+    const parentMatch = match(parent)
+    if (keyword !== '' && !parentMatch && children.length === 0) continue
+    rows.push({
+      unitId: parent.unitId,
+      unitName: parent.unitName,
+      level: 1,
+      parentUnitId: null,
+      isParent: children.length > 0,
+      childCount: children.length,
     })
-    .filter((n): n is UnitTreeNode => n !== null)
+    if (!collapsed.value[parent.unitId]) {
+      for (const child of children) {
+        rows.push({
+          unitId: child.unitId,
+          unitName: child.unitName,
+          level: 2,
+          parentUnitId: child.parentUnitId,
+          isParent: false,
+          childCount: 0,
+        })
+      }
+    }
+  }
+  return rows
 })
-
-// 默认展开全部一级分组；watch immediate 让初始数据也展开
-const expanded = ref<Record<string, boolean>>({})
-watch(tableData, (rows) => {
-  const next: Record<string, boolean> = {}
-  for (const r of rows) next[r.unitId] = true
-  expanded.value = next
-}, { immediate: true })
 
 const columns = [
   { accessorKey: 'unitName', header: '名称' },
@@ -110,8 +132,8 @@ const deleteTarget = ref<UnitSummary | null>(null)
 const deleteOpen = ref(false)
 const deleting = ref(false)
 
-function confirmDelete(u: UnitSummary) {
-  deleteTarget.value = u
+function confirmDelete(row: FlatRow) {
+  deleteTarget.value = { unitId: row.unitId, unitName: row.unitName, unitType: '', level: row.level, parentUnitId: row.parentUnitId }
   deleteOpen.value = true
 }
 
@@ -137,67 +159,54 @@ async function doDelete() {
 const createOpen = ref(false)
 const creating = ref(false)
 const createForm = reactive({
+  parentId: '',
+  parentName: '',
   unitId: '',
   name: '',
-  unitType: 'college' as 'college' | 'department' | 'other',
-  parentName: '',
   licenseMonths: 12,
 })
 
-// 一级单位列表（已有 + 用于 InputMenu autocomplete）
 const level1Units = computed(() => units.value.filter(u => u.level === 1))
 
-// 一级单位自动补全选项：已有单位名 + 新建提示
-const parentItems = computed(() => {
-  const existing = level1Units.value.map(u => ({ label: u.unitName, value: u.unitName }))
-  return existing
-})
+// 一级单位 autocomplete：以 unitId 为 value
+const parentItems = computed(() =>
+  level1Units.value.map(u => ({ label: `${u.unitName}（${u.unitId}）`, value: u.unitId })),
+)
 
-// 检测用户输入的一级单位名称是否为「新建」（不存在于已有列表）
+/** 输入的一级标识是否已存在（已存在则直接使用，无操作；不存在则需填名称再创建） */
+const existingParent = computed(() => level1Units.value.find(u => u.unitId === createForm.parentId.trim()))
 const isNewParent = computed(() => {
-  const name = createForm.parentName.trim()
-  if (!name) return false
-  return !level1Units.value.some(u => u.unitName === name)
+  const id = createForm.parentId.trim()
+  if (!id) return false
+  return !level1Units.value.some(u => u.unitId === id)
 })
 
-// 新建一级需要二次确认
-const confirmNewParent = ref(false)
-
-/** 用户在 InputMenu 选择「Create xxx」时，@create 回调传入 searchTerm 字符串；直接赋给 parentName。 */
-function onParentCreate(term: unknown) {
-  createForm.parentName = String(term).trim()
-  confirmNewParent.value = false
-}
 function openCreate() {
-  Object.assign(createForm, { unitId: '', name: '', unitType: 'college', parentName: '', licenseMonths: 12 })
-  confirmNewParent.value = false
+  Object.assign(createForm, { parentId: '', parentName: '', unitId: '', name: '', licenseMonths: 12 })
   createOpen.value = true
 }
 
 async function createUnit() {
-  if (!createForm.unitId.trim() || !createForm.name.trim() || !createForm.parentName.trim()) {
-    toast.add({ title: '请填写单位标识、名称与所属一级单位', color: 'error' })
+  if (!createForm.parentId.trim() || !createForm.unitId.trim() || !createForm.name.trim()) {
+    toast.add({ title: '请填写一级标识、二级标识与名称', color: 'error' })
     return
   }
-  // 新建一级必须先确认
-  if (isNewParent.value && !confirmNewParent.value) {
-    toast.add({ title: '检测到新的一级单位，请先勾选确认', color: 'warning' })
+  // 新建一级时必须有名称
+  if (isNewParent.value && !createForm.parentName.trim()) {
+    toast.add({ title: '一级标识不存在，请填写一级单位名称', color: 'warning' })
     return
   }
 
   creating.value = true
   try {
-    // 查找或创建一级单位
-    let parentId: string | undefined
-    const existing = level1Units.value.find(u => u.unitName === createForm.parentName.trim())
-    if (existing) {
-      parentId = existing.unitId
+    let parentId: string
+    if (existingParent.value) {
+      parentId = existingParent.value.unitId
     }
     else {
-      // 新建一级单位（先创建一级，再创建二级）
       const parentRes = await api<{ ok: true; data: { unit: { unitId: string } } }>('/admin/units', {
         method: 'POST',
-        body: { unitId: createForm.parentName.trim(), name: createForm.parentName.trim(), level: 1 },
+        body: { unitId: createForm.parentId.trim(), name: createForm.parentName.trim(), level: 1 },
       })
       parentId = parentRes.data.unit.unitId
     }
@@ -214,7 +223,6 @@ async function createUnit() {
         unitId: createForm.unitId.trim(),
         name: createForm.name.trim(),
         level: 2,
-        unitType: createForm.unitType,
         parentId,
         templateId: tpl.id,
         licenseMonths: createForm.licenseMonths,
@@ -298,31 +306,25 @@ definePageMeta({ title: '单位' })
       <UButton class="ml-auto" icon="i-lucide-plus" label="创建单位" @click="openCreate" />
     </div>
 
-    <UTable
-      v-model:expanded="expanded"
-      :data="tableData"
-      :columns="columns"
-      :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []"
-      :get-row-id="(row: UnitTreeNode) => row.unitId"
-    >
+    <UTable :data="flatRows" :columns="columns">
       <template #unitName-cell="{ row }">
-        <div class="flex items-center gap-1.5" :class="!row.getCanExpand() && 'pl-6'">
+        <div class="flex items-center gap-1.5" :class="row.original.level === 2 && 'pl-6'">
           <UButton
-            v-if="row.getCanExpand()"
-            :icon="row.getIsExpanded() ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+            v-if="row.original.isParent"
+            :icon="collapsed[row.original.unitId] ? 'i-lucide-chevron-right' : 'i-lucide-chevron-down'"
             color="neutral"
             variant="ghost"
             size="xs"
             :ui="{ base: 'size-5' }"
-            @click="row.toggleExpanded()"
+            @click="toggleCollapse(row.original.unitId)"
           />
-          <span :class="row.getCanExpand() ? 'font-semibold' : ''">{{ row.original.unitName }}</span>
+          <span :class="row.original.isParent ? 'font-semibold' : ''">{{ row.original.unitName }}</span>
           <UBadge
-            v-if="row.getCanExpand()"
+            v-if="row.original.isParent"
             size="sm"
             variant="subtle"
             color="neutral"
-            :label="`${row.original.subRows?.length ?? 0} 个下级`"
+            :label="`${row.original.childCount} 个下级`"
           />
         </div>
       </template>
@@ -453,51 +455,38 @@ definePageMeta({ title: '单位' })
     </UModal>
 
     <!-- 创建单位 -->
-    <UModal v-model:open="createOpen" title="创建单位" description="二级单位将自动绑定最新已发布模板并签发首个授权码" :ui="{ footer: 'justify-end' }">
+    <UModal v-model:open="createOpen" title="创建单位" description="二级单位将自动绑定最新已发布模板并签发首个授权码">
       <template #body>
         <UForm :state="createForm" class="space-y-4">
-          <UFormField label="所属一级单位" name="parentName" required>
+          <!-- 一级标识（camelCase）：已存在则自动填充名称；不存在则需填名称 -->
+          <UFormField label="所属一级标识" name="parentId" required>
             <UInputMenu
-              v-model="createForm.parentName"
+              v-model="createForm.parentId"
               mode="autocomplete"
               :items="parentItems"
               value-key="value"
               create-item
-              placeholder="搜索已有或输入新建"
+              placeholder="输入已有标识或新建"
               class="w-full"
-              @create="onParentCreate"
             />
           </UFormField>
 
-          <!-- 新建一级单位二次确认 -->
-          <UAlert
-            v-if="isNewParent"
-            color="warning"
-            variant="subtle"
-            icon="i-lucide-triangle-alert"
-            title="检测到新的一级单位"
-            description="请确认名称无误后勾选下方复选框，否则无法创建。"
-          />
-          <UCheckbox
-            v-if="isNewParent"
-            v-model="confirmNewParent"
-            label="确认新建一级单位"
-          />
+          <!-- 已存在时显示单位名称 -->
+          <UFormField v-if="existingParent" label="一级单位名称" name="parentNameExisting">
+            <UInput :model-value="existingParent.unitName" disabled class="w-full" />
+          </UFormField>
+
+          <!-- 不存在时显示名称输入框（代替二次确认） -->
+          <UFormField v-if="isNewParent" label="新一级单位名称" name="parentName" required>
+            <UInput v-model="createForm.parentName" placeholder="如 宁夏大学" class="w-full" />
+          </UFormField>
 
           <UFormField label="二级单位标识（camelCase）" name="unitId" required>
-            <UInput v-model="createForm.unitId" placeholder="如 myCollege" class="w-full" />
+            <UInput v-model="createForm.unitId" placeholder="如 nxuLx" class="w-full" />
           </UFormField>
 
           <UFormField label="二级单位名称" name="name" required>
-            <UInput v-model="createForm.name" class="w-full" />
-          </UFormField>
-
-          <UFormField label="类型" name="unitType">
-            <USelect
-              v-model="createForm.unitType"
-              :items="[{ label: '书院/学院', value: 'college' }, { label: '部门', value: 'department' }, { label: '其他', value: 'other' }]"
-              class="w-full"
-            />
+            <UInput v-model="createForm.name" placeholder="如 励行书院" class="w-full" />
           </UFormField>
 
           <UFormField label="首个授权码月数" name="licenseMonths">
