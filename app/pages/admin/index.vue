@@ -1,6 +1,4 @@
 <script setup lang="ts">
-
-
 interface UnitSummary {
   unitId: string
   unitName: string
@@ -61,7 +59,7 @@ async function loadTemplates() {
   templates.value = data.data.templates
 }
 
-// ---- 表格数据：TanStack 分组行（一级组 + 二级 subRows），含搜索过滤
+// ---- 表格数据：一级分组行内嵌二级 subRows，含搜索过滤
 interface UnitTreeNode extends UnitSummary {
   subRows?: UnitTreeNode[]
 }
@@ -82,6 +80,7 @@ const tableData = computed<UnitTreeNode[]>(() => {
     .filter((n): n is UnitTreeNode => n !== null)
 })
 
+// 默认展开全部一级分组；watch immediate 让初始数据也展开
 const expanded = ref<Record<string, boolean>>({})
 watch(tableData, (rows) => {
   const next: Record<string, boolean> = {}
@@ -134,37 +133,94 @@ async function doDelete() {
   }
 }
 
+// ---- 创建单位
+const createOpen = ref(false)
+const creating = ref(false)
+const createForm = reactive({
+  unitId: '',
+  name: '',
+  unitType: 'college' as 'college' | 'department' | 'other',
+  parentName: '',
+  licenseMonths: 12,
+})
+
+// 一级单位列表（已有 + 用于 InputMenu autocomplete）
+const level1Units = computed(() => units.value.filter(u => u.level === 1))
+
+// 一级单位自动补全选项：已有单位名 + 新建提示
+const parentItems = computed(() => {
+  const existing = level1Units.value.map(u => ({ label: u.unitName, value: u.unitName }))
+  return existing
+})
+
+// 检测用户输入的一级单位名称是否为「新建」（不存在于已有列表）
+const isNewParent = computed(() => {
+  const name = createForm.parentName.trim()
+  if (!name) return false
+  return !level1Units.value.some(u => u.unitName === name)
+})
+
+// 新建一级需要二次确认
+const confirmNewParent = ref(false)
+
+function openCreate() {
+  Object.assign(createForm, { unitId: '', name: '', unitType: 'college', parentName: '', licenseMonths: 12 })
+  confirmNewParent.value = false
+  createOpen.value = true
+}
+
 async function createUnit() {
+  if (!createForm.unitId.trim() || !createForm.name.trim() || !createForm.parentName.trim()) {
+    toast.add({ title: '请填写单位标识、名称与所属一级单位', color: 'error' })
+    return
+  }
+  // 新建一级必须先确认
+  if (isNewParent.value && !confirmNewParent.value) {
+    toast.add({ title: '检测到新的一级单位，请先勾选确认', color: 'warning' })
+    return
+  }
+
   creating.value = true
   try {
-    const body: Record<string, unknown> = {
-      unitId: createForm.unitId,
-      name: createForm.name,
-      level: createForm.level,
-      unitType: createForm.unitType,
-      licenseMonths: createForm.licenseMonths,
+    // 查找或创建一级单位
+    let parentId: string | undefined
+    const existing = level1Units.value.find(u => u.unitName === createForm.parentName.trim())
+    if (existing) {
+      parentId = existing.unitId
     }
-    if (createForm.level === 2) {
-      const parent = units.value.find(u => u.level === 1)
-      if (!parent) {
-        return
-      }
-      body.parentId = parent.unitId
-      const tpl = templates.value.find(t => t.status === 'published')
-      if (!tpl) {
-        toast.add({ title: '没有已发布的配置模板，请先上传并发布模板', color: 'error' })
-        return
-      }
-      body.templateId = tpl.id
+    else {
+      // 新建一级单位（先创建一级，再创建二级）
+      const parentRes = await api<{ ok: true; data: { unit: { unitId: string } } }>('/admin/units', {
+        method: 'POST',
+        body: { unitId: createForm.parentName.trim(), name: createForm.parentName.trim(), level: 1 },
+      })
+      parentId = parentRes.data.unit.unitId
     }
-    const data = await api<{ ok: true; data: { code: string | null } }>('/admin/units', { method: 'POST', body })
+
+    const tpl = templates.value.find(t => t.status === 'published')
+    if (!tpl) {
+      toast.add({ title: '没有已发布的配置模板，请先上传并发布模板', color: 'error' })
+      return
+    }
+
+    const data = await api<{ ok: true; data: { code: string | null } }>('/admin/units', {
+      method: 'POST',
+      body: {
+        unitId: createForm.unitId.trim(),
+        name: createForm.name.trim(),
+        level: 2,
+        unitType: createForm.unitType,
+        parentId,
+        templateId: tpl.id,
+        licenseMonths: createForm.licenseMonths,
+      },
+    })
     toast.add({
       title: '创建成功',
       description: data.data.code ? `首个授权码：${data.data.code}` : undefined,
       color: 'success',
     })
     createOpen.value = false
-    Object.assign(createForm, { unitId: '', name: '', level: 2, unitType: 'college', licenseMonths: 12 })
     await loadUnits()
   }
   catch (e) {
@@ -234,20 +290,36 @@ definePageMeta({ title: '单位' })
       <span class="text-sm text-muted">
         {{ units.filter(u => u.level === 2).length }} 个二级单位
       </span>
-      <UButton class="ml-auto" icon="i-lucide-plus" label="创建单位" @click="createOpen = true" />
+      <UButton class="ml-auto" icon="i-lucide-plus" label="创建单位" @click="openCreate" />
     </div>
 
-    <UTable v-model:expanded="expanded" :data="tableData" :columns="columns" :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []" :get-row-id="(row: UnitTreeNode) => row.unitId">
+    <UTable
+      v-model:expanded="expanded"
+      :data="tableData"
+      :columns="columns"
+      :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []"
+      :get-row-id="(row: UnitTreeNode) => row.unitId"
+    >
       <template #unitName-cell="{ row }">
-        <span :class="row.getCanExpand() ? 'font-semibold' : 'pl-6'">{{ row.original.unitName }}</span>
-        <UBadge
-          v-if="row.getCanExpand()"
-          size="sm"
-          variant="subtle"
-          color="neutral"
-          class="ml-2"
-          :label="`${row.original.subRows?.length ?? 0} 个下级`"
-        />
+        <div class="flex items-center gap-1.5" :class="!row.getCanExpand() && 'pl-6'">
+          <UButton
+            v-if="row.getCanExpand()"
+            :icon="row.getIsExpanded() ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            :ui="{ base: 'size-5' }"
+            @click="row.toggleExpanded()"
+          />
+          <span :class="row.getCanExpand() ? 'font-semibold' : ''">{{ row.original.unitName }}</span>
+          <UBadge
+            v-if="row.getCanExpand()"
+            size="sm"
+            variant="subtle"
+            color="neutral"
+            :label="`${row.original.subRows?.length ?? 0} 个下级`"
+          />
+        </div>
       </template>
       <template #unitId-cell="{ row }">
         <code class="text-xs">{{ row.original.unitId }}</code>
@@ -368,7 +440,7 @@ definePageMeta({ title: '单位' })
         </p>
       </template>
       <template #footer>
-        <div class="flex justify-end gap-2">
+        <div class="flex justify-end gap-2 w-full">
           <UButton color="neutral" variant="ghost" label="取消" @click="deleteOpen = false" />
           <UButton color="error" :loading="deleting" label="删除" @click="doDelete" />
         </div>
@@ -376,36 +448,57 @@ definePageMeta({ title: '单位' })
     </UModal>
 
     <!-- 创建单位 -->
-    <UModal v-model:open="createOpen" title="创建单位" description="二级单位将自动绑定最新已发布模板并签发首个授权码">
+    <UModal v-model:open="createOpen" title="创建单位" description="二级单位将自动绑定最新已发布模板并签发首个授权码" :ui="{ footer: 'justify-end' }">
       <template #body>
-        <UForm :state="createForm" @submit="createUnit">
-          <UFormField label="单位标识（camelCase）" name="unitId">
-            <UInput v-model="createForm.unitId" placeholder="如 myCollege" class="w-full" required />
-          </UFormField>
-          <UFormField label="单位名称" name="name" class="mt-4">
-            <UInput v-model="createForm.name" class="w-full" required />
-          </UFormField>
-          <UFormField label="层级" name="level" class="mt-4">
-            <USelect
-              v-model="createForm.level"
-              :items="[{ label: '一级（分组）', value: 1 }, { label: '二级（独立单位）', value: 2 }]"
+        <UForm :state="createForm" class="space-y-4">
+          <UFormField label="所属一级单位" name="parentName" required>
+            <UInputMenu
+              v-model="createForm.parentName"
+              :items="parentItems"
+              value-key="value"
+              placeholder="搜索已有或输入新建"
               class="w-full"
             />
           </UFormField>
-          <UFormField label="类型" name="unitType" class="mt-4">
+
+          <!-- 新建一级单位二次确认 -->
+          <UAlert
+            v-if="isNewParent"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            title="检测到新的一级单位"
+            description="请确认名称无误后勾选下方复选框，否则无法创建。"
+          />
+          <UCheckbox
+            v-if="isNewParent"
+            v-model="confirmNewParent"
+            label="确认新建一级单位"
+          />
+
+          <UFormField label="二级单位标识（camelCase）" name="unitId" required>
+            <UInput v-model="createForm.unitId" placeholder="如 myCollege" class="w-full" />
+          </UFormField>
+
+          <UFormField label="二级单位名称" name="name" required>
+            <UInput v-model="createForm.name" class="w-full" />
+          </UFormField>
+
+          <UFormField label="类型" name="unitType">
             <USelect
               v-model="createForm.unitType"
               :items="[{ label: '书院/学院', value: 'college' }, { label: '部门', value: 'department' }, { label: '其他', value: 'other' }]"
               class="w-full"
             />
           </UFormField>
-          <UFormField label="首个授权码月数" name="licenseMonths" class="mt-4">
+
+          <UFormField label="首个授权码月数" name="licenseMonths">
             <UInputNumber v-model="createForm.licenseMonths" :min="1" :max="120" class="w-full" />
           </UFormField>
         </UForm>
       </template>
       <template #footer>
-        <div class="flex justify-end gap-2">
+        <div class="flex justify-end gap-2 w-full">
           <UButton color="neutral" variant="ghost" label="取消" @click="createOpen = false" />
           <UButton :loading="creating" label="创建" @click="createUnit" />
         </div>
