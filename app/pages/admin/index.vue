@@ -163,6 +163,11 @@ const isNewParent = computed(() => {
 // 新建一级需要二次确认
 const confirmNewParent = ref(false)
 
+/** 用户在 InputMenu 选择「Create xxx」时，@create 回调传入 searchTerm 字符串；直接赋给 parentName。 */
+function onParentCreate(term: unknown) {
+  createForm.parentName = String(term).trim()
+  confirmNewParent.value = false
+}
 function openCreate() {
   Object.assign(createForm, { unitId: '', name: '', unitType: 'college', parentName: '', licenseMonths: 12 })
   confirmNewParent.value = false
@@ -454,11 +459,13 @@ definePageMeta({ title: '单位' })
           <UFormField label="所属一级单位" name="parentName" required>
             <UInputMenu
               v-model="createForm.parentName"
+              mode="autocomplete"
               :items="parentItems"
               value-key="value"
               create-item
               placeholder="搜索已有或输入新建"
               class="w-full"
+              @create="onParentCreate"
             />
           </UFormField>
 
