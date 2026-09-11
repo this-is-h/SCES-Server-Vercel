@@ -29,322 +29,324 @@ interface TemplateVersion {
   updatedAt: number
 }
 
+const toast = useToast()
 const { api, logout } = useAdminAuth()
 
 const units = ref<UnitSummary[]>([])
 const templates = ref<TemplateVersion[]>([])
 const detail = ref<UnitDetail | null>(null)
-const newUnit = ref({ unitId: '', name: '', level: 1 })
+const detailOpen = ref(false)
 const newLicenseMonths = ref(12)
-const message = ref('')
-const error = ref('')
+const creating = ref(false)
+const createOpen = ref(false)
+const createForm = reactive({ unitId: '', name: '', level: 1 as 1 | 2, unitType: 'other' as 'college' | 'department' | 'other', licenseMonths: 12 })
+
+const LEVEL_TEXT: Record<number, string> = { 1: '一级', 2: '二级' }
+const UNIT_TYPE_TEXT: Record<string, string> = { college: '书院/学院', department: '部门', other: '其他' }
+const LICENSE_STATUS_COLOR: Record<string, 'success' | 'warning' | 'error'> = { active: 'success', expired: 'warning', revoked: 'error' }
+const LICENSE_STATUS_TEXT: Record<string, string> = { active: '有效', expired: '已过期', revoked: '已作废' }
+const TEMPLATE_STATUS_COLOR: Record<string, 'success' | 'neutral' | 'warning'> = { published: 'success', draft: 'neutral', archived: 'warning' }
+const TEMPLATE_STATUS_TEXT: Record<string, string> = { published: '已发布', draft: '草稿', archived: '已归档' }
+
+function fmtDate(ms: number): string {
+  return new Date(ms).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
+const level2Count = computed(() => units.value.filter(u => u.level === 2).length)
 
 onMounted(async () => {
   await Promise.all([loadUnits(), loadTemplates()])
 })
 
 async function loadUnits() {
-  try {
-    const data = await api<{ ok: true; data: { units: UnitSummary[] } }>('/admin/units')
-    units.value = data.data.units
-  }
-  catch {
-    error.value = '单位列表加载失败'
-  }
+  const data = await api<{ ok: true; data: { units: UnitSummary[] } }>('/admin/units')
+  units.value = data.data.units
 }
 
 async function loadTemplates() {
-  try {
-    const data = await api<{ ok: true; data: { templates: TemplateVersion[] } }>('/admin/templates')
-    templates.value = data.data.templates
-  }
-  catch {
-    error.value = '模板列表加载失败'
-  }
+  const data = await api<{ ok: true; data: { templates: TemplateVersion[] } }>('/admin/templates')
+  templates.value = data.data.templates
 }
 
 async function loadDetail(unitId: string) {
-  error.value = ''
-  try {
-    const data = await api<{ ok: true; data: UnitDetail }>(`/admin/units/${unitId}`)
-    detail.value = data.data
-  }
-  catch {
-    error.value = '单位详情加载失败'
-  }
+  const data = await api<{ ok: true; data: UnitDetail }>(`/admin/units/${unitId}`)
+  detail.value = data.data
+  detailOpen.value = true
 }
 
+async function openConfig(t: { id: string; version: number; revision: number }) {
+  const data = await api<{ ok: true; data: { config: unknown } }>(`/admin/templates/${t.id}/versions/${t.version}/${t.revision}/config`)
+  configJson.value = JSON.stringify(data.data.config, null, 2)
+  configTitle.value = `${t.id}@${t.version}.${t.revision}`
+  configOpen.value = true
+}
+
+const unitColumns = [
+  { accessorKey: 'unitId', header: '标识' },
+  { accessorKey: 'unitName', header: '名称' },
+  { accessorKey: 'level', header: '层级' },
+  { accessorKey: 'parentUnitId', header: '上级单位' },
+  { id: 'actions', header: '操作' },
+]
+
+const licenseColumns = [
+  { accessorKey: 'code', header: '授权码' },
+  { accessorKey: 'expiresAt', header: '到期' },
+  { accessorKey: 'status', header: '状态' },
+  { accessorKey: 'renewCount', header: '续期次数' },
+  { id: 'actions', header: '操作' },
+]
+
+const configOpen = ref(false)
+const configTitle = ref('')
+const configJson = ref('')
+
+
 async function createUnit() {
-  message.value = ''
-  error.value = ''
+  creating.value = true
   try {
     const body: Record<string, unknown> = {
-      unitId: newUnit.value.unitId,
-      name: newUnit.value.name,
-      level: newUnit.value.level,
+      unitId: createForm.unitId,
+      name: createForm.name,
+      level: createForm.level,
+      unitType: createForm.unitType,
+      licenseMonths: createForm.licenseMonths,
     }
-    if (newUnit.value.level === 2) {
+    if (createForm.level === 2) {
       const parent = units.value.find(u => u.level === 1)
       if (!parent) {
-        error.value = '请先创建一级单位'
+        toast.add({ title: '请先创建一级单位', color: 'error' })
         return
       }
       body.parentId = parent.unitId
-      body.templateId = templates.value[0]?.id ?? 'default-template'
+      const tpl = templates.value.find(t => t.status === 'published')
+      if (!tpl) {
+        toast.add({ title: '没有已发布的配置模板，请先上传并发布模板', color: 'error' })
+        return
+      }
+      body.templateId = tpl.id
     }
-    const data = await api<{ ok: true; data: { code: string | null } }>('/admin/units', { method: 'POST', body })
-    message.value = data.data.code ? `创建成功，首个授权码：${data.data.code}` : '创建成功'
-    newUnit.value = { unitId: '', name: '', level: 1 }
+    const data = await api<{ ok: true; data: { code: string | null; expiresAt: number | null } }>('/admin/units', { method: 'POST', body })
+    toast.add({
+      title: '创建成功',
+      description: data.data.code ? `首个授权码：${data.data.code}` : undefined,
+      color: 'success',
+    })
+    createOpen.value = false
+    Object.assign(createForm, { unitId: '', name: '', level: 1, unitType: 'other', licenseMonths: 12 })
     await loadUnits()
   }
   catch (e) {
-    error.value = e instanceof Error && 'data' in e
-      ? ((e as { data?: { error?: string } }).data?.error ?? '创建失败')
-      : '创建失败'
+    toast.add({ title: extractApiError(e, '创建失败'), color: 'error' })
+  }
+  finally {
+    creating.value = false
   }
 }
 
 async function issueLicense(unitId: string) {
-  message.value = ''
-  error.value = ''
   try {
     const data = await api<{ ok: true; data: { code: string } }>(`/admin/units/${unitId}/licenses`, {
       method: 'POST',
       body: { months: newLicenseMonths.value },
     })
-    message.value = `已签发授权码：${data.data.code}`
+    toast.add({ title: '已签发授权码', description: data.data.code, color: 'success' })
     await loadDetail(unitId)
   }
   catch (e) {
-    error.value = e instanceof Error && 'data' in e
-      ? ((e as { data?: { error?: string } }).data?.error ?? '签发失败')
-      : '签发失败'
+    toast.add({ title: extractApiError(e, '签发失败'), color: 'error' })
   }
 }
 
 async function revokeLicense(code: string) {
-  message.value = ''
   try {
     await api(`/admin/licenses/${code}/revoke`, { method: 'POST', body: {} })
-    message.value = `已作废 ${code}`
+    toast.add({ title: `已作废 ${code}`, color: 'success' })
     if (detail.value) await loadDetail(detail.value.unit.unitId)
   }
   catch (e) {
-    error.value = e instanceof Error && 'data' in e
-      ? ((e as { data?: { error?: string } }).data?.error ?? '作废失败')
-      : '作废失败'
+    toast.add({ title: extractApiError(e, '作废失败'), color: 'error' })
   }
 }
 
 async function renewLicense(code: string) {
-  message.value = ''
   try {
     await api(`/admin/licenses/${code}/renew`, { method: 'POST', body: { months: newLicenseMonths.value } })
-    message.value = `已续期 ${code}`
+    toast.add({ title: `已续期 ${code}`, color: 'success' })
     if (detail.value) await loadDetail(detail.value.unit.unitId)
   }
   catch (e) {
-    error.value = e instanceof Error && 'data' in e
-      ? ((e as { data?: { error?: string } }).data?.error ?? '续期失败')
-      : '续期失败'
+    toast.add({ title: extractApiError(e, '续期失败'), color: 'error' })
   }
 }
 
-async function publishTemplate(t: TemplateVersion) {
-  message.value = ''
-  try {
-    await api(`/admin/templates/${t.id}/publish`, {
-      method: 'POST',
-      body: { version: t.version, revision: t.revision },
-    })
-    message.value = `已发布 ${t.id}@${t.version}.${t.revision}`
-    await loadTemplates()
-  }
-  catch (e) {
-    error.value = e instanceof Error && 'data' in e
-      ? ((e as { data?: { error?: string } }).data?.error ?? '发布失败')
-      : '发布失败'
-  }
-}
-
-const STATUS_TEXT: Record<string, string> = {
-  active: '有效',
-  expired: '已过期',
-  revoked: '已作废',
-  draft: '草稿',
-  published: '已发布',
-  archived: '已归档',
-}
+definePageMeta({ title: '单位' })
 </script>
 
 <template>
-  <main class="admin">
-    <header>
-      <h1>SCES 管理后台</h1>
-      <button @click="async () => { await logout(); navigateTo('/admin/login') }">
-        退出登录
-      </button>
-    </header>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold">
+          单位
+        </h2>
+        <p class="text-sm text-muted">
+          共 {{ units.length }} 个单位（一级 {{ units.length - level2Count }} / 二级 {{ level2Count }}）
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <UButton
+          icon="i-lucide-log-out"
+          color="neutral"
+          variant="ghost"
+          label="退出登录"
+          @click="async () => { await logout(); navigateTo('/admin/login') }"
+        />
+        <UButton icon="i-lucide-plus" label="创建单位" @click="createOpen = true" />
+      </div>
+    </div>
 
-    <p v-if="message" class="ok">
-      {{ message }}
-    </p>
-    <p v-if="error" class="error">
-      {{ error }}
-    </p>
+    <UTable :data="units" :columns="unitColumns" :loading="units.length === 0 && false">
+      <template #unitId-cell="{ row }">
+        <span class="font-medium">{{ row.original.unitId }}</span>
+      </template>
+      <template #level-cell="{ row }">
+        <UBadge :color="row.original.level === 1 ? 'info' : 'secondary'" variant="subtle" :label="LEVEL_TEXT[row.original.level]" />
+      </template>
+      <template #actions-cell="{ row }">
+        <UButton size="xs" variant="soft" label="详情" @click="loadDetail(row.original.unitId)" />
+      </template>
+    </UTable>
 
-    <section>
-      <h2>单位</h2>
-      <form class="row" @submit.prevent="createUnit">
-        <input v-model="newUnit.unitId" placeholder="单位标识（如 xiaoQu1）" required>
-        <input v-model="newUnit.name" placeholder="单位名称" required>
-        <select v-model.number="newUnit.level">
-          <option :value="1">
-            一级单位
-          </option>
-          <option :value="2">
-            二级单位
-          </option>
-        </select>
-        <button type="submit">
-          创建
-        </button>
-      </form>
+    <!-- 单位详情抽屉 -->
+    <UDrawer
+      v-model:open="detailOpen"
+      :title="detail ? `单位详情：${detail.unit.unitName}` : ''"
+      :ui="{ content: 'max-w-2xl' }"
+    >
+      <template #body>
+        <div v-if="detail" class="space-y-6">
+          <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <dt class="text-muted">
+              标识
+            </dt>
+            <dd>{{ detail.unit.unitId }}</dd>
+            <dt class="text-muted">
+              名称
+            </dt>
+            <dd>{{ detail.unit.unitName }}</dd>
+            <dt class="text-muted">
+              层级
+            </dt>
+            <dd>{{ LEVEL_TEXT[detail.unit.level] }}</dd>
+            <dt class="text-muted">
+              类型
+            </dt>
+            <dd>{{ UNIT_TYPE_TEXT[detail.unit.unitType] ?? detail.unit.unitType }}</dd>
+            <dt class="text-muted">
+              绑定模板
+            </dt>
+            <dd v-if="detail.template">
+              {{ detail.template.id }}@{{ detail.template.version }}.{{ detail.template.revision }}
+              <UBadge
+                size="sm"
+                variant="subtle"
+                :color="TEMPLATE_STATUS_COLOR[detail.template.status]"
+                :label="TEMPLATE_STATUS_TEXT[detail.template.status]"
+              />
+            </dd>
+            <dd v-else class="text-muted">
+              未绑定
+            </dd>
+            <dt class="text-muted">
+              单位公钥
+            </dt>
+            <dd>{{ detail.publicKeyJwk ? '已生成' : '未生成' }}</dd>
+          </dl>
 
-      <table>
-        <thead>
-          <tr>
-            <th>标识</th>
-            <th>名称</th>
-            <th>层级</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="unit in units" :key="unit.unitId">
-            <td>{{ unit.unitId }}</td>
-            <td>{{ unit.unitName }}</td>
-            <td>{{ unit.level === 1 ? '一级' : '二级' }}</td>
-            <td>
-              <button @click="loadDetail(unit.unitId)">
-                详情
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+          <div class="flex items-center gap-2">
+            <UInputNumber v-model="newLicenseMonths" :min="1" :max="120" class="w-28" />
+            <span class="text-sm text-muted">月</span>
+            <UButton
+              v-if="detail.unit.level === 2"
+              icon="i-lucide-ticket-plus"
+              label="签发新授权码"
+              @click="issueLicense(detail.unit.unitId)"
+            />
+          </div>
 
-    <section v-if="detail">
-      <h2>单位详情：{{ detail.unit.unitName }}</h2>
-      <label class="row">
-        签发月数
-        <input v-model.number="newLicenseMonths" type="number" min="1" max="120">
-      </label>
-      <button @click="issueLicense(detail.unit.unitId)">
-        签发新授权码
-      </button>
+          <UTable :data="detail.licenses" :columns="licenseColumns">
+            <template #code-cell="{ row }">
+              <code class="font-mono text-sm">{{ row.original.code }}</code>
+            </template>
+            <template #expiresAt-cell="{ row }">
+              {{ fmtDate(row.original.expiresAt) }}
+            </template>
+            <template #status-cell="{ row }">
+              <UBadge
+                variant="subtle"
+                :color="LICENSE_STATUS_COLOR[row.original.status]"
+                :label="LICENSE_STATUS_TEXT[row.original.status]"
+              />
+            </template>
+            <template #actions-cell="{ row }">
+              <div class="flex gap-1">
+                <UButton size="xs" variant="soft" label="续期" @click="renewLicense(row.original.code)" />
+                <UButton
+                  v-if="row.original.status === 'active'"
+                  size="xs"
+                  variant="soft"
+                  color="error"
+                  label="作废"
+                  @click="revokeLicense(row.original.code)"
+                />
+              </div>
+            </template>
+            <template #empty>
+              <p class="text-sm text-muted py-6 text-center">
+                暂无授权码
+              </p>
+            </template>
+          </UTable>
+        </div>
+      </template>
+    </UDrawer>
 
-      <table>
-        <thead>
-          <tr>
-            <th>授权码</th>
-            <th>到期</th>
-            <th>状态</th>
-            <th>续期次数</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="license in detail.licenses" :key="license.code">
-            <td><code>{{ license.code }}</code></td>
-            <td>{{ new Date(license.expiresAt).toLocaleDateString() }}</td>
-            <td>{{ STATUS_TEXT[license.status] ?? license.status }}</td>
-            <td>{{ license.renewCount }}</td>
-            <td>
-              <button @click="renewLicense(license.code)">
-                续期
-              </button>
-              <button class="danger" @click="revokeLicense(license.code)">
-                作废
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section>
-      <h2>配置模板</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>名称</th>
-            <th>版本</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="template in templates" :key="`${template.id}-${template.version}-${template.revision}`">
-            <td>{{ template.id }}</td>
-            <td>{{ template.name }}</td>
-            <td>{{ template.version }}.{{ template.revision }}</td>
-            <td>{{ STATUS_TEXT[template.status] ?? template.status }}</td>
-            <td>
-              <button
-                v-if="template.status === 'draft'"
-                @click="publishTemplate(template)"
-              >
-                发布
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-  </main>
+    <!-- 创建单位弹窗 -->
+    <UModal v-model:open="createOpen" title="创建单位" description="二级单位将自动绑定最新已发布模板并签发首个授权码">
+      <template #body>
+        <UForm :state="createForm" @submit="createUnit">
+          <UFormField label="单位标识（camelCase）" name="unitId">
+            <UInput v-model="createForm.unitId" placeholder="如 myCollege" class="w-full" required />
+          </UFormField>
+          <UFormField label="单位名称" name="name" class="mt-4">
+            <UInput v-model="createForm.name" class="w-full" required />
+          </UFormField>
+          <UFormField label="层级" name="level" class="mt-4">
+            <USelect
+              v-model="createForm.level"
+              :items="[{ label: '一级（学校）', value: 1 }, { label: '二级（书院）', value: 2 }]"
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField label="类型" name="unitType" class="mt-4">
+            <USelect
+              v-model="createForm.unitType"
+              :items="[{ label: '书院/学院', value: 'college' }, { label: '部门', value: 'department' }, { label: '其他', value: 'other' }]"
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField label="首个授权码月数" name="licenseMonths" class="mt-4">
+            <UInputNumber v-model="createForm.licenseMonths" :min="1" :max="120" class="w-full" />
+          </UFormField>
+        </UForm>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" label="取消" @click="createOpen = false" />
+          <UButton :loading="creating" label="创建" @click="createUnit" />
+        </div>
+      </template>
+    </UModal>
+  </div>
 </template>
-
-<style scoped>
-.admin {
-  max-width: 860px;
-  margin: 2rem auto;
-  font-family: system-ui, sans-serif;
-}
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-section {
-  margin-top: 2rem;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 0.75rem;
-}
-th,
-td {
-  border: 1px solid #d4d4d4;
-  padding: 0.4rem 0.6rem;
-  text-align: left;
-}
-.row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.ok {
-  color: #15803d;
-}
-.error {
-  color: #b91c1c;
-}
-.danger {
-  color: #b91c1c;
-}
-</style>

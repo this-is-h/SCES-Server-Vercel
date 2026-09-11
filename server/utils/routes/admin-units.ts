@@ -259,6 +259,36 @@ adminUnitsRouter.get('/admin/templates/:templateId/versions', async (c) => {
   return c.json({ ok: true as const, data: { versions: versions.map(toTemplateVersion) } })
 })
 
+/** 接口 20：查看模板配置内容（后台只读，返回完整 UnitConfig）。 */
+adminUnitsRouter.get('/admin/templates/:templateId/versions/:version/:revision/config', async (c) => {
+  const db = c.get('db')
+  const templateId = c.req.param('templateId')
+  const version = Number(c.req.param('version'))
+  const revision = Number(c.req.param('revision'))
+  if (!Number.isInteger(version) || version < 1 || !Number.isInteger(revision) || revision < 0) {
+    throw badRequest('版本参数不合法')
+  }
+  const row = await findTemplateVersion(db, templateId, version, revision)
+  if (row === undefined) throw notFound('模板版本不存在')
+
+  const config: UnitConfig = {
+    schemaVersion: row.schema_version,
+    id: row.id,
+    name: row.name,
+    version: row.version,
+    revision: row.revision,
+    status: row.status,
+    unit: JSON.parse(row.unit_json),
+    class: JSON.parse(row.class_json),
+    student: JSON.parse(row.student_json),
+    dyf: JSON.parse(row.dyf_json),
+    calc: JSON.parse(row.calc_json),
+    rank: JSON.parse(row.rank_json),
+    updatedAt: row.updated_at,
+  }
+  return c.json({ ok: true as const, data: { config } })
+})
+
 /** 接口 20：发布模板版本（同 id 其他 published 转 archived）。 */
 adminUnitsRouter.post('/admin/templates/:templateId/publish', async (c) => {
   const db = c.get('db')

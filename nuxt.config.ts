@@ -1,7 +1,9 @@
 import { defineNuxtConfig } from 'nuxt/config'
 
 export default defineNuxtConfig({
-  compatibilityDate: '2026-09-11',
+  modules: ['@nuxt/ui'],
+
+  css: ['~/assets/css/main.css'],
 
   // 管理后台是登录后才可见的内部系统，无需 SEO；SSR 关闭可获得纯 SPA 行为，
   // 且避免每个页面渲染都占用服务函数调用（免费额度敏感）。

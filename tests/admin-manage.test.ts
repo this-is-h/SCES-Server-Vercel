@@ -224,6 +224,26 @@ describe('后台管理接口 18–21', () => {
       expect(data.version).toBe(seed.version)
     })
 
+    it('查看模板配置内容返回完整 UnitConfig；不存在的版本 404', async () => {
+      const seed = loadTestSeed()
+      await call('POST', '/api/v1/admin/templates', { config: seed })
+
+      const res = await call(
+        'GET',
+        `/api/v1/admin/templates/${seed.id}/versions/${seed.version}/${seed.revision}/config`,
+      )
+      const { config } = await readData<{ config: typeof seed }>(res)
+      expect(config).toEqual({ ...seed, status: 'draft', updatedAt: expect.any(Number) })
+      // 六段 JSON 重组与上传时逐字段一致
+      expect(config.class).toEqual(seed.class)
+      expect(config.dyf).toEqual(seed.dyf)
+      expect(config.calc).toEqual(seed.calc)
+      expect(config.rank).toEqual(seed.rank)
+
+      const missing = await call('GET', `/api/v1/admin/templates/${seed.id}/versions/9/0/config`)
+      expect(missing.status).toBe(404)
+    })
+
     it('上传非法配置返回 400「配置格式不合法：…」', async () => {
       const res = await call('POST', '/api/v1/admin/templates', { config: { schemaVersion: 1 } })
       expect(res.status).toBe(400)

@@ -1959,6 +1959,47 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/ServerError' }
+  /api/v1/admin/templates/{templateId}/versions/{version}/{revision}/config:
+    get:
+      tags: [后台配置模板]
+      summary: 查看模板配置内容（接口 20）
+      description: |
+        返回指定版本的完整单位配置 JSON（后台只读查看）。
+        结构与上传时的 `UnitConfig` 完全一致。
+      operationId: adminGetTemplateConfig
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/templateIdPath'
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: revision
+          in: path
+          required: true
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: 配置内容
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [config]
+                    properties:
+                      config: { $ref: '#/components/schemas/UnitConfig' }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
 
   /api/v1/admin/templates/{templateId}/publish:
     post:
