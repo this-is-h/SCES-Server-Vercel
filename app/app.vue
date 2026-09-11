@@ -7,6 +7,12 @@ const bare = computed(() => route.path === '/admin/login')
 
 const { logout } = useAdminAuth()
 
+// 单位页注册「创建单位」动作到 navbar；modal 本体在单位页，点击经计数器转发
+const createClick = useState<number>('navbar-create-click', () => 0)
+function openCreateUnit() {
+  createClick.value++
+}
+
 const items = computed<NavigationMenuItem[][]>(() => [
   [
     { label: '单位', icon: 'i-lucide-building-2', to: '/admin' },
@@ -92,8 +98,12 @@ const userMenuItems: DropdownMenuItem[][] = [
               <UDashboardSidebarCollapse />
             </template>
             <template #right>
-              <!-- 页面经 useNavbarActions() 注册的动作按钮（如「创建单位」） -->
-              <component :is="useNavbarActions().component" />
+              <UButton
+                v-if="route.path === '/admin'"
+                icon="i-lucide-plus"
+                label="创建单位"
+                @click="openCreateUnit"
+              />
             </template>
           </UDashboardNavbar>
         </template>

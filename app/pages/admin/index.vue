@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
+
 
 interface UnitSummary {
   unitId: string
@@ -33,7 +33,6 @@ interface TemplateVersion {
 
 const toast = useToast()
 const { api } = useAdminAuth()
-const navbarActions = useNavbarActions()
 
 const units = ref<UnitSummary[]>([])
 const templates = ref<TemplateVersion[]>([])
@@ -127,27 +126,10 @@ async function doDelete() {
     deleting.value = false
   }
 }
-
-// ---- 创建单位（navbar 动作）
-const creating = ref(false)
-const createOpen = ref(false)
-const createForm = reactive({ unitId: '', name: '', level: 2 as 1 | 2, unitType: 'college' as 'college' | 'department' | 'other', licenseMonths: 12 })
-
-const CreateAction = defineComponent({
-  setup() {
-    return () => h(UButton, {
-      icon: 'i-lucide-plus',
-      label: '创建单位',
-      onClick: () => { createOpen.value = true },
-    })
-  },
-})
-
-onMounted(() => {
-  navbarActions.set(CreateAction as unknown as Component)
-})
-onUnmounted(() => {
-  navbarActions.set(null)
+// navbar「创建单位」按钮点击计数（app.vue 转发）→ 打开本页 modal
+const createClick = useState<number>('navbar-create-click', () => 0)
+watch(createClick, () => {
+  if (createClick.value > 0) createOpen.value = true
 })
 
 async function createUnit() {
