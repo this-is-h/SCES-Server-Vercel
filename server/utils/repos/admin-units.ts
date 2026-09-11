@@ -27,6 +27,19 @@ export async function listUnits(db: Db, level?: number): Promise<UnitRow[]> {
   return db.query<UnitRow>(`SELECT * FROM unit WHERE level = $1 ORDER BY created_at`, [level])
 }
 
+/** 接口 18 单位删除：一级单位有下级时返回 false（调用方转 409），否则级联删除全部关联数据。 */
+export async function deleteUnit(db: Db, unitId: string): Promise<boolean> {
+  const children = await db.query<{ id: string }>(
+    `SELECT id FROM unit WHERE parent_id = $1 LIMIT 1`,
+    [unitId],
+  )
+  if (children.length > 0) return false
+  // batch → config_template 为 RESTRICT：先显式删批次，再删单位（其余表走 CASCADE）
+  await db.query(`DELETE FROM batch WHERE unit_id = $1`, [unitId])
+  const removed = await db.query<{ id: string }>(`DELETE FROM unit WHERE id = $1 RETURNING id`, [unitId])
+  return removed.length > 0
+}
+
 export async function listLicensesForUnit(db: Db, unitId: string): Promise<LicenseRow[]> {
   return db.query<LicenseRow>(`SELECT * FROM license WHERE unit_id = $1 ORDER BY created_at`, [unitId])
 }

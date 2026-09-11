@@ -1699,6 +1699,47 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/ServerError' }
+    delete:
+      tags: [后台单位与授权]
+      summary: 删除单位（接口 18）
+      description: |
+        删除指定单位及其全部关联数据（授权码、单位令牌、换机记录、批次、申请状态、
+        配置模板，均 `ON DELETE CASCADE`）。一级单位存在下级单位时拒绝删除（409）。
+        落审计日志。
+      operationId: adminDeleteUnit
+      security:
+        - adminToken: []
+      parameters:
+        - $ref: '#/components/parameters/unitIdPath'
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [ok]
+                    properties:
+                      ok: { const: true }
+                    additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 一级单位下仍有下级单位
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                hasChildren:
+                  value: { ok: false, error: '该单位下仍有下级单位，请先删除下级单位' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
 
   /api/v1/admin/units/{unitId}/licenses:
     post:

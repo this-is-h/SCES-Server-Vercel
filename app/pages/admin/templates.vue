@@ -18,9 +18,8 @@ const versionsFor = ref<string | null>(null)
 const configOpen = ref(false)
 const configTitle = ref('')
 const configJson = ref('')
-
-const TEMPLATE_STATUS_COLOR: Record<string, 'success' | 'neutral' | 'warning'> = { published: 'success', draft: 'neutral', archived: 'warning' }
-const TEMPLATE_STATUS_TEXT: Record<string, string> = { published: '已发布', draft: '草稿', archived: '已归档' }
+const search = ref('')
+const unitFilter = ref<string | null>(null)
 
 function fmtDate(ms: number): string {
   return new Date(ms).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -44,12 +43,33 @@ const versionColumns = [
   { id: 'actions', header: '操作' },
 ]
 
+const TEMPLATE_STATUS_COLOR: Record<string, 'success' | 'neutral' | 'warning'> = { published: 'success', draft: 'neutral', archived: 'warning' }
+const TEMPLATE_STATUS_TEXT: Record<string, string> = { published: '已发布', draft: '草稿', archived: '已归档' }
+
 onMounted(loadTemplates)
 
 async function loadTemplates() {
   const data = await api<{ ok: true; data: { templates: TemplateVersion[] } }>('/admin/templates')
   templates.value = data.data.templates
 }
+
+/** 模板按单位（到一级即可）+ 名称/标识搜索过滤。 */
+const filtered = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return templates.value.filter((t) => {
+    if (keyword !== '' && !t.name.toLowerCase().includes(keyword) && !t.id.toLowerCase().includes(keyword)) return false
+    return true
+  })
+})
+
+const unitOptions = computed(() => {
+  const ids = [...new Set(templates.value.map(t => t.unitId))]
+  return [{ label: '全部单位', value: null }, ...ids.map(id => ({ label: id, value: id }))]
+})
+
+const filteredByUnit = computed(() =>
+  unitFilter.value === null ? filtered.value : filtered.value.filter(t => t.unitId === unitFilter.value),
+)
 
 async function loadVersions(id: string) {
   versionsFor.value = versionsFor.value === id ? null : id
@@ -89,17 +109,18 @@ definePageMeta({ title: '配置模板' })
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div>
-      <h2 class="text-lg font-semibold">
-        配置模板
-      </h2>
-      <p class="text-sm text-muted">
-        每个模板保留全部历史版本；同一 id 至多一个 published。上传走服务端 API（接口 20 POST）。
-      </p>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2">
+      <UInput
+        v-model="search"
+        icon="i-lucide-search"
+        placeholder="按名称或标识筛选…"
+        class="w-64"
+      />
+      <USelect v-model="unitFilter" :items="unitOptions" icon="i-lucide-building-2" class="w-44" />
     </div>
 
-    <UTable :data="templates" :columns="columns">
+    <UTable :data="filteredByUnit" :columns="columns">
       <template #unitId-cell="{ row }">
         <code class="text-xs">{{ row.original.unitId }}</code>
       </template>
@@ -130,7 +151,7 @@ definePageMeta({ title: '配置模板' })
       </template>
       <template #empty>
         <p class="text-sm text-muted py-6 text-center">
-          暂无模板。通过 POST /api/v1/admin/templates 上传种子配置（contracts/seed/*.json）。
+          无匹配模板
         </p>
       </template>
     </UTable>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
+
 interface UnitSummary {
   unitId: string
   unitName: string
@@ -30,19 +32,13 @@ interface TemplateVersion {
 }
 
 const toast = useToast()
-const { api, logout } = useAdminAuth()
+const { api } = useAdminAuth()
+const navbarActions = useNavbarActions()
 
 const units = ref<UnitSummary[]>([])
 const templates = ref<TemplateVersion[]>([])
-const detail = ref<UnitDetail | null>(null)
-const detailOpen = ref(false)
-const newLicenseMonths = ref(12)
-const creating = ref(false)
-const createOpen = ref(false)
-const createForm = reactive({ unitId: '', name: '', level: 1 as 1 | 2, unitType: 'other' as 'college' | 'department' | 'other', licenseMonths: 12 })
+const search = ref('')
 
-const LEVEL_TEXT: Record<number, string> = { 1: '一级', 2: '二级' }
-const UNIT_TYPE_TEXT: Record<string, string> = { college: '书院/学院', department: '部门', other: '其他' }
 const LICENSE_STATUS_COLOR: Record<string, 'success' | 'warning' | 'error'> = { active: 'success', expired: 'warning', revoked: 'error' }
 const LICENSE_STATUS_TEXT: Record<string, string> = { active: '有效', expired: '已过期', revoked: '已作废' }
 const TEMPLATE_STATUS_COLOR: Record<string, 'success' | 'neutral' | 'warning'> = { published: 'success', draft: 'neutral', archived: 'warning' }
@@ -51,8 +47,6 @@ const TEMPLATE_STATUS_TEXT: Record<string, string> = { published: '已发布', d
 function fmtDate(ms: number): string {
   return new Date(ms).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
-
-const level2Count = computed(() => units.value.filter(u => u.level === 2).length)
 
 onMounted(async () => {
   await Promise.all([loadUnits(), loadTemplates()])
@@ -68,39 +62,93 @@ async function loadTemplates() {
   templates.value = data.data.templates
 }
 
+// ---- 表格数据：TanStack 分组行（一级组 + 二级 subRows），含搜索过滤
+interface UnitTreeNode extends UnitSummary {
+  subRows?: UnitTreeNode[]
+}
+
+const tableData = computed<UnitTreeNode[]>(() => {
+  const keyword = search.value.trim().toLowerCase()
+  const match = (u: UnitSummary) =>
+    keyword === '' || u.unitName.toLowerCase().includes(keyword) || u.unitId.toLowerCase().includes(keyword)
+  const level2 = units.value.filter(u => u.level === 2)
+  const level1 = units.value.filter(u => u.level === 1)
+  return level1
+    .map((parent) => {
+      const children = level2.filter(u => u.parentUnitId === parent.unitId && match(u))
+      const selfMatch = match(parent)
+      if (keyword !== '' && !selfMatch && children.length === 0) return null
+      return { ...parent, subRows: children }
+    })
+    .filter((n): n is UnitTreeNode => n !== null)
+})
+
+const columns = [
+  { accessorKey: 'unitName', header: '名称' },
+  { accessorKey: 'unitId', header: '标识' },
+  { id: 'actions', header: '' },
+]
+
+// ---- 详情抽屉（右侧滑出）
+const detail = ref<UnitDetail | null>(null)
+const detailOpen = ref(false)
+const newLicenseMonths = ref(12)
+
 async function loadDetail(unitId: string) {
   const data = await api<{ ok: true; data: UnitDetail }>(`/admin/units/${unitId}`)
   detail.value = data.data
   detailOpen.value = true
 }
 
-async function openConfig(t: { id: string; version: number; revision: number }) {
-  const data = await api<{ ok: true; data: { config: unknown } }>(`/admin/templates/${t.id}/versions/${t.version}/${t.revision}/config`)
-  configJson.value = JSON.stringify(data.data.config, null, 2)
-  configTitle.value = `${t.id}@${t.version}.${t.revision}`
-  configOpen.value = true
+// ---- 删除（带确认）
+const deleteTarget = ref<UnitSummary | null>(null)
+const deleteOpen = ref(false)
+const deleting = ref(false)
+
+function confirmDelete(u: UnitSummary) {
+  deleteTarget.value = u
+  deleteOpen.value = true
 }
 
-const unitColumns = [
-  { accessorKey: 'unitId', header: '标识' },
-  { accessorKey: 'unitName', header: '名称' },
-  { accessorKey: 'level', header: '层级' },
-  { accessorKey: 'parentUnitId', header: '上级单位' },
-  { id: 'actions', header: '操作' },
-]
+async function doDelete() {
+  if (!deleteTarget.value) return
+  deleting.value = true
+  try {
+    await api(`/admin/units/${deleteTarget.value.unitId}`, { method: 'DELETE' })
+    toast.add({ title: `已删除 ${deleteTarget.value.unitName}`, color: 'success' })
+    deleteOpen.value = false
+    detailOpen.value = false
+    await loadUnits()
+  }
+  catch (e) {
+    toast.add({ title: extractApiError(e, '删除失败'), color: 'error' })
+  }
+  finally {
+    deleting.value = false
+  }
+}
 
-const licenseColumns = [
-  { accessorKey: 'code', header: '授权码' },
-  { accessorKey: 'expiresAt', header: '到期' },
-  { accessorKey: 'status', header: '状态' },
-  { accessorKey: 'renewCount', header: '续期次数' },
-  { id: 'actions', header: '操作' },
-]
+// ---- 创建单位（navbar 动作）
+const creating = ref(false)
+const createOpen = ref(false)
+const createForm = reactive({ unitId: '', name: '', level: 2 as 1 | 2, unitType: 'college' as 'college' | 'department' | 'other', licenseMonths: 12 })
 
-const configOpen = ref(false)
-const configTitle = ref('')
-const configJson = ref('')
+const CreateAction = defineComponent({
+  setup() {
+    return () => h(UButton, {
+      icon: 'i-lucide-plus',
+      label: '创建单位',
+      onClick: () => { createOpen.value = true },
+    })
+  },
+})
 
+onMounted(() => {
+  navbarActions.set(CreateAction as unknown as Component)
+})
+onUnmounted(() => {
+  navbarActions.set(null)
+})
 
 async function createUnit() {
   creating.value = true
@@ -115,7 +163,6 @@ async function createUnit() {
     if (createForm.level === 2) {
       const parent = units.value.find(u => u.level === 1)
       if (!parent) {
-        toast.add({ title: '请先创建一级单位', color: 'error' })
         return
       }
       body.parentId = parent.unitId
@@ -126,14 +173,14 @@ async function createUnit() {
       }
       body.templateId = tpl.id
     }
-    const data = await api<{ ok: true; data: { code: string | null; expiresAt: number | null } }>('/admin/units', { method: 'POST', body })
+    const data = await api<{ ok: true; data: { code: string | null } }>('/admin/units', { method: 'POST', body })
     toast.add({
       title: '创建成功',
       description: data.data.code ? `首个授权码：${data.data.code}` : undefined,
       color: 'success',
     })
     createOpen.value = false
-    Object.assign(createForm, { unitId: '', name: '', level: 1, unitType: 'other', licenseMonths: 12 })
+    Object.assign(createForm, { unitId: '', name: '', level: 2, unitType: 'college', licenseMonths: 12 })
     await loadUnits()
   }
   catch (e) {
@@ -180,49 +227,64 @@ async function renewLicense(code: string) {
   }
 }
 
+const detailColumns = [
+  { accessorKey: 'code', header: '授权码' },
+  { accessorKey: 'expiresAt', header: '到期' },
+  { accessorKey: 'status', header: '状态' },
+  { accessorKey: 'renewCount', header: '续期' },
+  { id: 'actions', header: '' },
+]
+
 definePageMeta({ title: '单位' })
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold">
-          单位
-        </h2>
-        <p class="text-sm text-muted">
-          共 {{ units.length }} 个单位（一级 {{ units.length - level2Count }} / 二级 {{ level2Count }}）
-        </p>
-      </div>
-      <div class="flex gap-2">
-        <UButton
-          icon="i-lucide-log-out"
-          color="neutral"
-          variant="ghost"
-          label="退出登录"
-          @click="async () => { await logout(); navigateTo('/admin/login') }"
-        />
-        <UButton icon="i-lucide-plus" label="创建单位" @click="createOpen = true" />
-      </div>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2">
+      <UInput
+        v-model="search"
+        icon="i-lucide-search"
+        placeholder="按名称或标识筛选…"
+        class="w-64"
+      />
+      <span class="text-sm text-muted">
+        {{ units.filter(u => u.level === 2).length }} 个二级单位
+      </span>
     </div>
 
-    <UTable :data="units" :columns="unitColumns" :loading="units.length === 0 && false">
-      <template #unitId-cell="{ row }">
-        <span class="font-medium">{{ row.original.unitId }}</span>
+    <UTable :data="tableData" :columns="columns" :get-sub-rows="(row: UnitTreeNode) => row.subRows ?? []" :expanded-options="{ getExpandedRowModel: undefined }">
+      <template #unitName-cell="{ row }">
+        <span :class="row.getCanExpand() ? 'font-semibold' : 'pl-6'">{{ row.original.unitName }}</span>
+        <UBadge
+          v-if="row.getCanExpand()"
+          size="sm"
+          variant="subtle"
+          color="neutral"
+          class="ml-2"
+          :label="`${row.original.subRows?.length ?? 0} 个下级`"
+        />
       </template>
-      <template #level-cell="{ row }">
-        <UBadge :color="row.original.level === 1 ? 'info' : 'secondary'" variant="subtle" :label="LEVEL_TEXT[row.original.level]" />
+      <template #unitId-cell="{ row }">
+        <code class="text-xs">{{ row.original.unitId }}</code>
       </template>
       <template #actions-cell="{ row }">
-        <UButton size="xs" variant="soft" label="详情" @click="loadDetail(row.original.unitId)" />
+        <div class="flex gap-1">
+          <UButton size="xs" variant="soft" label="详情" @click="loadDetail(row.original.unitId)" />
+          <UButton size="xs" variant="soft" color="error" icon="i-lucide-trash-2" label="删除" @click="confirmDelete(row.original)" />
+        </div>
+      </template>
+      <template #empty>
+        <p class="text-sm text-muted py-6 text-center">
+          无匹配单位
+        </p>
       </template>
     </UTable>
 
-    <!-- 单位详情抽屉 -->
-    <UDrawer
+    <!-- 单位详情：右侧滑出层 -->
+    <USlideover
       v-model:open="detailOpen"
       :title="detail ? `单位详情：${detail.unit.unitName}` : ''"
-      :ui="{ content: 'max-w-2xl' }"
+      :ui="{ content: 'max-w-xl' }"
     >
       <template #body>
         <div v-if="detail" class="space-y-6">
@@ -238,11 +300,11 @@ definePageMeta({ title: '单位' })
             <dt class="text-muted">
               层级
             </dt>
-            <dd>{{ LEVEL_TEXT[detail.unit.level] }}</dd>
+            <dd>{{ detail.unit.level === 1 ? '一级' : '二级' }}</dd>
             <dt class="text-muted">
-              类型
+              上级单位
             </dt>
-            <dd>{{ UNIT_TYPE_TEXT[detail.unit.unitType] ?? detail.unit.unitType }}</dd>
+            <dd>{{ detail.unit.parentUnitId ?? '—' }}</dd>
             <dt class="text-muted">
               绑定模板
             </dt>
@@ -275,7 +337,7 @@ definePageMeta({ title: '单位' })
             />
           </div>
 
-          <UTable :data="detail.licenses" :columns="licenseColumns">
+          <UTable :data="detail.licenses" :columns="detailColumns">
             <template #code-cell="{ row }">
               <code class="font-mono text-sm">{{ row.original.code }}</code>
             </template>
@@ -310,9 +372,25 @@ definePageMeta({ title: '单位' })
           </UTable>
         </div>
       </template>
-    </UDrawer>
+    </USlideover>
 
-    <!-- 创建单位弹窗 -->
+    <!-- 删除确认 -->
+    <UModal v-model:open="deleteOpen" title="删除单位" description="将同时删除其授权码、批次与配置模板，且不可恢复。">
+      <template #body>
+        <p v-if="deleteTarget" class="text-sm">
+          确认删除
+          <b>{{ deleteTarget.unitName }}</b>（{{ deleteTarget.unitId }}）？
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" label="取消" @click="deleteOpen = false" />
+          <UButton color="error" :loading="deleting" label="删除" @click="doDelete" />
+        </div>
+      </template>
+    </UModal>
+
+    <!-- 创建单位 -->
     <UModal v-model:open="createOpen" title="创建单位" description="二级单位将自动绑定最新已发布模板并签发首个授权码">
       <template #body>
         <UForm :state="createForm" @submit="createUnit">
@@ -325,7 +403,7 @@ definePageMeta({ title: '单位' })
           <UFormField label="层级" name="level" class="mt-4">
             <USelect
               v-model="createForm.level"
-              :items="[{ label: '一级（学校）', value: 1 }, { label: '二级（书院）', value: 2 }]"
+              :items="[{ label: '一级（分组）', value: 1 }, { label: '二级（独立单位）', value: 2 }]"
               class="w-full"
             />
           </UFormField>

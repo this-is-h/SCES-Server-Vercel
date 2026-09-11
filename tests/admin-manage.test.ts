@@ -36,7 +36,7 @@ describe('后台管理接口 18–21', () => {
   })
 
   const call = (
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body?: unknown,
     withToken = true,
@@ -119,6 +119,29 @@ describe('后台管理接口 18–21', () => {
       )
       expect(onlyTwo.units.every((u) => u.level === 2)).toBe(true)
       void seed
+    })
+
+    it('删除二级单位级联清理授权码与模板；一级单位有下级返回 409', async () => {
+      const seed = await seedSchoolAndUnit()
+
+      // 一级单位有下级 → 409
+      const parentRes = await call('DELETE', `/api/v1/admin/units/${seed.unit.parentUnit.unitId}`)
+      expect(parentRes.status).toBe(409)
+      expect(await readError(parentRes)).toBe('该单位下仍有下级单位，请先删除下级单位')
+
+      // 删除二级单位 → 200，关联数据级联清理
+      const res = await call('DELETE', `/api/v1/admin/units/${seed.unit.unitId}`)
+      expect(res.status).toBe(200)
+      const licenses = await ctx.db.query(`SELECT * FROM license WHERE unit_id = $1`, [seed.unit.unitId])
+      expect(licenses).toHaveLength(0)
+      const templates = await ctx.db.query(`SELECT * FROM config_template WHERE unit_id = $1`, [seed.unit.unitId])
+      expect(templates).toHaveLength(0)
+
+      // 重复删除 → 404
+      expect((await call('DELETE', `/api/v1/admin/units/${seed.unit.unitId}`)).status).toBe(404)
+
+      // 下级已删,一级可删
+      expect((await call('DELETE', `/api/v1/admin/units/${seed.unit.parentUnit.unitId}`)).status).toBe(200)
     })
 
     it('单位详情返回授权码列表与模板', async () => {

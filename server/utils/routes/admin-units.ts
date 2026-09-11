@@ -9,6 +9,7 @@ import { isUnitConfig, firstConfigError } from '../schemas/unit-config.js'
 import { requireAdminToken } from './admin-auth.js'
 import {
   insertTemplateFromConfig,
+  deleteUnit,
   insertUnit,
   listLatestTemplateVersions,
   listLicensesForUnit,
@@ -132,7 +133,23 @@ adminUnitsRouter.get('/admin/units/:unitId', async (c) => {
   })
 })
 
-/** 接口 19：为二级单位签发新授权码。 */
+
+/** 接口 18：删除单位（有下级 409；级联删除授权码/令牌/批次/模板等）。 */
+adminUnitsRouter.delete('/admin/units/:unitId', async (c) => {
+  const db = c.get('db')
+  const auth = c.get('adminAuth')
+  const unitId = c.req.param('unitId')
+  if ((await findUnitById(db, unitId)) === undefined) throw notFound('单位不存在')
+  const deleted = await deleteUnit(db, unitId)
+  if (!deleted) throw conflict('该单位下仍有下级单位，请先删除下级单位')
+  await recordAudit(db, {
+    adminUserId: auth.adminUserId,
+    action: 'unit-delete',
+    target: unitId,
+    ip: c.req.header('x-forwarded-for') ?? null,
+  })
+  return c.json({ ok: true as const, data: { ok: true as const } })
+})
 adminUnitsRouter.post('/admin/units/:unitId/licenses', async (c) => {
   const db = c.get('db')
   const auth = c.get('adminAuth')

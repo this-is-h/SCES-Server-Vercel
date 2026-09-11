@@ -13,7 +13,11 @@ const toast = useToast()
 const { api } = useAdminAuth()
 
 const rebinds = ref<RebindRow[]>([])
+const units = ref<{ unitId: string; unitName: string; level: number; parentUnitId: string | null }[]>([])
 const statusFilter = ref<string | null>(null)
+const parentFilter = ref<string | null>(null)
+const unitFilter = ref<string | null>(null)
+const search = ref('')
 
 const STATUS_COLOR: Record<string, 'warning' | 'neutral' | 'success' | 'error'> = { pending: 'warning', 'self-served': 'neutral', approved: 'success', rejected: 'error' }
 const STATUS_TEXT: Record<string, string> = { pending: '待放行', 'self-served': '自助完成', approved: '已放行', rejected: '已拒绝' }
@@ -30,13 +34,48 @@ const columns = [
   { id: 'actions', header: '操作' },
 ]
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), loadUnits()])
+})
 
 async function load() {
-  const q = statusFilter.value ? `?status=${statusFilter.value}` : ''
-  const data = await api<{ ok: true; data: { rebinds: RebindRow[] } }>(`/admin/rebinds${q}`)
+  const params = new URLSearchParams()
+  if (statusFilter.value) params.set('status', statusFilter.value)
+  const data = await api<{ ok: true; data: { rebinds: RebindRow[] } }>(`/admin/rebinds?${params}`)
   rebinds.value = data.data.rebinds
 }
+
+async function loadUnits() {
+  const data = await api<{ ok: true; data: { units: { unitId: string; unitName: string; level: number; parentUnitId: string | null }[] } }>('/admin/units')
+  units.value = data.data.units
+}
+
+const parentOptions = computed(() => [
+  { label: '全部一级单位', value: null },
+  ...units.value.filter(u => u.level === 1).map(u => ({ label: u.unitName, value: u.unitId })),
+])
+
+const unitOptions = computed(() => {
+  const level2 = units.value.filter(u => u.level === 2 && (parentFilter.value === null || u.parentUnitId === parentFilter.value))
+  return [{ label: '全部二级单位', value: null }, ...level2.map(u => ({ label: u.unitName, value: u.unitId }))]
+})
+
+function onParentChange() {
+  if (parentFilter.value !== null && unitFilter.value !== null) {
+    const current = units.value.find(u => u.unitId === unitFilter.value)
+    if (!current || current.parentUnitId !== parentFilter.value) unitFilter.value = null
+  }
+  load()
+}
+
+const filtered = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return rebinds.value.filter((r) => {
+    if (unitFilter.value !== null && r.unitId !== unitFilter.value) return false
+    if (keyword !== '' && !r.id.toLowerCase().includes(keyword) && !r.unitId.toLowerCase().includes(keyword)) return false
+    return true
+  })
+})
 
 async function approve(r: RebindRow, ok: boolean) {
   try {
@@ -53,16 +92,16 @@ definePageMeta({ title: '换机记录' })
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold">
-          换机记录
-        </h2>
-        <p class="text-sm text-muted">
-          自助换机仅审计；超出月限 3 次的申请为待放行，需人工放行
-        </p>
-      </div>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2 flex-wrap">
+      <UInput
+        v-model="search"
+        icon="i-lucide-search"
+        placeholder="按申请或单位筛选…"
+        class="w-56"
+      />
+      <USelect v-model="parentFilter" :items="parentOptions" icon="i-lucide-building-2" class="w-40" @update:model-value="onParentChange" />
+      <USelect v-model="unitFilter" :items="unitOptions" icon="i-lucide-layers" class="w-44" @update:model-value="() => {}" />
       <USelect
         v-model="statusFilter"
         :items="[{ label: '全部状态', value: null }, { label: '待放行', value: 'pending' }, { label: '自助完成', value: 'self-served' }, { label: '已放行', value: 'approved' }, { label: '已拒绝', value: 'rejected' }]"
@@ -72,9 +111,12 @@ definePageMeta({ title: '换机记录' })
       />
     </div>
 
-    <UTable :data="rebinds" :columns="columns">
+    <UTable :data="filtered" :columns="columns">
       <template #id-cell="{ row }">
         <code class="text-xs">{{ row.original.id.slice(0, 8) }}…</code>
+      </template>
+      <template #unitId-cell="{ row }">
+        <code class="text-xs">{{ row.original.unitId }}</code>
       </template>
       <template #status-cell="{ row }">
         <UBadge variant="subtle" :color="STATUS_COLOR[row.original.status]" :label="STATUS_TEXT[row.original.status]" />

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
+import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 
-// 登录前页面（/admin/login、/admin/change-password 未登录态）不包后台壳
+// 登录前页面（/admin/login）不包后台壳
 const route = useRoute()
 const bare = computed(() => route.path === '/admin/login')
+
+const { logout } = useAdminAuth()
 
 const items = computed<NavigationMenuItem[][]>(() => [
   [
@@ -14,6 +16,20 @@ const items = computed<NavigationMenuItem[][]>(() => [
     { label: '审计日志', icon: 'i-lucide-scroll-text', to: '/admin/audit-logs' },
   ],
 ])
+
+const userMenuItems: DropdownMenuItem[][] = [
+  [
+    { label: '修改密码', icon: 'i-lucide-key-round', to: '/admin/change-password' },
+    {
+      label: '退出登录',
+      icon: 'i-lucide-log-out',
+      onSelect: async () => {
+        await logout()
+        navigateTo('/admin/login')
+      },
+    },
+  ],
+]
 </script>
 
 <template>
@@ -49,16 +65,23 @@ const items = computed<NavigationMenuItem[][]>(() => [
         </template>
 
         <template #footer="{ collapsed }">
-          <UButton
-            icon="i-lucide-key-round"
-            :label="collapsed ? undefined : '修改密码'"
-            color="neutral"
-            variant="ghost"
-            block
-            :square="collapsed"
-            class="py-2"
-            to="/admin/change-password"
-          />
+          <UDropdownMenu
+            :items="userMenuItems"
+            :content="{ align: 'start', collisionPadding: 12 }"
+            :ui="{ content: collapsed ? 'w-40' : 'w-(--reka-dropdown-menu-trigger-width)' }"
+          >
+            <UButton
+              icon="i-lucide-user-round"
+              :label="collapsed ? undefined : 'admin'"
+              trailing-icon="i-lucide-chevrons-up-down"
+              color="neutral"
+              variant="ghost"
+              block
+              :square="collapsed"
+              class="data-[state=open]:bg-elevated py-2"
+              :ui="{ trailingIcon: 'text-dimmed' }"
+            />
+          </UDropdownMenu>
         </template>
       </UDashboardSidebar>
 
@@ -67,6 +90,10 @@ const items = computed<NavigationMenuItem[][]>(() => [
           <UDashboardNavbar :title="route.meta.title as string ?? 'SCES 管理后台'">
             <template #leading>
               <UDashboardSidebarCollapse />
+            </template>
+            <template #right>
+              <!-- 页面经 useNavbarActions() 注册的动作按钮（如「创建单位」） -->
+              <component :is="useNavbarActions().component" />
             </template>
           </UDashboardNavbar>
         </template>
