@@ -19,8 +19,11 @@
     "verify": "pnpm type-check && pnpm check:contracts && pnpm test"
   },
   "dependencies": {
+    "h3": "^1.15.11",
     "hono": "^4.9.0",
+    "nuxt": "^4.5.2",
     "postgres": "^3.4.9",
+    "vue": "^3.5.42",
     "zod": "^4.6.1"
   },
   "devDependencies": {

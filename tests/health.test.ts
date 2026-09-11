@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createApp } from '../src/app.js'
+import { createApp } from '../server/utils/app.js'
 import { unusedDb } from './helpers/stub-db.js'
 
 const app = createApp({ db: unusedDb })

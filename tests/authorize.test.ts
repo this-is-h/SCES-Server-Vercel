@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../src/app.js'
-import { sha256Hex } from '../src/lib/hash.js'
+import { createApp } from '../server/utils/app.js'
+import { sha256Hex } from '../server/utils/lib/hash.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 import { TEST_INSTALL_ID, activateUnit, jsonHeaders, seedTestUnit, unitHeaders } from './helpers/fixtures.js'
 import { readData, readError } from './helpers/http.js'

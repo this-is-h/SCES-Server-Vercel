@@ -52,6 +52,6 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   return app
 }
-/** 生产单例：官方 Hono on Vercel 布局要求 src/index.ts 默认导出 app。 */
+/** 生产单例：server/api/[...path].ts 桥接 Nuxt 请求到 Hono app。 */
 const productionApp = createApp({ db: lazyDb })
 export default productionApp

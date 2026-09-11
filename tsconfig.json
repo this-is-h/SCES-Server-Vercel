@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "api", "tests", "vitest.config.ts"]
+  "include": ["server/**/*.ts", "tests", "scripts", "vitest.config.ts", "nuxt.config.ts", ".nuxt/tsconfig.server.json", ".nuxt/types/nitro-imports.d.ts"]
 }

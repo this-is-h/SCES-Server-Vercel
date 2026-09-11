@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Hono } from 'hono'
-import { createApp } from '../src/app.js'
-import type { AppEnv } from '../src/http/env.js'
-import { sha256Hex } from '../src/lib/hash.js'
+import { createApp } from '../server/utils/app.js'
+import type { AppEnv } from '../server/utils/http/env.js'
+import { sha256Hex } from '../server/utils/lib/hash.js'
 import { createTestDb, type TestDb } from './helpers/db.js'
 import {
   activateUnit,
