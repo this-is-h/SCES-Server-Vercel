@@ -65,6 +65,18 @@ describe('后台认证（接口 14–17）', () => {
     expect(data.accessTokenExpiresAt - Date.now()).toBeLessThanOrEqual(15 * 60_000)
   })
 
+  it('接口 14：空库 + ADMIN_INITIAL_PASSWORD 首登自动建号并要求改密', async () => {
+    process.env.ADMIN_INITIAL_PASSWORD = 'bootstrap-pass-123'
+    try {
+      const data = await loginOk('admin', 'bootstrap-pass-123')
+      expect(data.username).toBe('admin')
+      expect(data.mustChangePassword).toBe(true)
+    }
+    finally {
+      delete process.env.ADMIN_INITIAL_PASSWORD
+    }
+  })
+
   it('接口 14：密码错误返回 401 契约文案', async () => {
     await seedAdmin()
     const res = await login({ username: 'admin', password: 'wrong-password' })
