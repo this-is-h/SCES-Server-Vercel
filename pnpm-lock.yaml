@@ -20,9 +20,6 @@ importers:
       postgres:
         specifier: ^3.4.9
         version: 3.4.9
-      vue:
-        specifier: ^3.5.42
-        version: 3.5.42(typescript@5.9.3)
       zod:
         specifier: ^4.6.1
         version: 4.6.1
@@ -39,15 +36,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.4
-      '@vercel/node':
-        specifier: ^12.0.3
-        version: 12.0.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@vercel/build-utils@14.9.3)(rollup@4.63.1)
       husky:
         specifier: ^9.1.7
         version: 9.1.7
-      tsx:
-        specifier: ^4.23.13
-        version: 4.23.13
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -9503,6 +9494,7 @@ snapshots:
       esbuild: 0.28.2
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   type-fest@5.9.0:
     dependencies:
