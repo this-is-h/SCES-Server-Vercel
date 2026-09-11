@@ -456,6 +456,7 @@ definePageMeta({ title: '单位' })
               v-model="createForm.parentName"
               :items="parentItems"
               value-key="value"
+              create-item
               placeholder="搜索已有或输入新建"
               class="w-full"
             />
