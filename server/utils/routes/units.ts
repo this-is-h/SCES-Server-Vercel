@@ -58,9 +58,11 @@ unitsRouter.post('/units/rebind', requireUnitToken, async (c) => {
   }
 
   const newCode = await db.transaction(async (tx) => {
-    const code = await issueLicense(tx, auth.unitId, license.expires_at)
+    // 先作废旧码再签发新码：uq_license_active_unit 只约束未作废行，反序会因同一单位
+    // 并存两条未作废授权码而违反部分唯一索引。
     await revokeLicense(tx, license.code)
     await revokeActiveTokensForLicense(tx, license.code)
+    const code = await issueLicense(tx, auth.unitId, license.expires_at)
     await insertRebind(tx, {
       id: randomUUID(),
       unitId: auth.unitId,

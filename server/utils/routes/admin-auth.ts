@@ -18,6 +18,7 @@ import {
   insertRefreshToken,
   updateAdminPassword,
 } from '../repos/admin-users.js'
+import { purgeExpiredRefreshTokens } from '../repos/cleanup.js'
 
 /** 后台写接口鉴权：`Authorization: Bearer <accessToken>`（HMAC JWT，无状态）。 */
 export const requireAdminToken = createMiddleware<AppEnv>(async (c, next) => {
@@ -74,6 +75,8 @@ adminAuthRouter.post('/admin/auth/login', async (c) => {
     tokenHash: sha256Hex(refreshToken),
     expiresAt: Date.now() + REFRESH_TOKEN_TTL_MS,
   })
+  // 过期刷新令牌仅登出/改密时删除；长期不登出的失效会话会留死行，登录顺手清扫。
+  await purgeExpiredRefreshTokens(db)
 
   return c.json({
     ok: true as const,

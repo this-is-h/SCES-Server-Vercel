@@ -19,6 +19,18 @@ export async function findLicenseByCode(db: Db, code: string): Promise<LicenseRo
   return rows[0]
 }
 
+/** 查询单位的未作废授权码（部分唯一索引 uq_license_active_unit 约束至多一条）。 */
+export async function findActiveLicenseForUnit(
+  db: Db,
+  unitId: string,
+): Promise<LicenseRow | undefined> {
+  const rows = await db.query<LicenseRow>(
+    `SELECT * FROM license WHERE unit_id = $1 AND status <> 'revoked'`,
+    [unitId],
+  )
+  return rows[0]
+}
+
 export async function createLicense(db: Db, input: { code: string; unitId: string; expiresAt: number }): Promise<void> {
   const at = Date.now()
   await db.query(

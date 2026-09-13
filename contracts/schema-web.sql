@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS unit (
 CREATE INDEX IF NOT EXISTS idx_unit_parent_id ON unit (parent_id);
 CREATE INDEX IF NOT EXISTS idx_unit_status_level ON unit (status, level);
 
--- 授权码（决策 #40：可续期，过期不强制重新激活）
+-- 授权码（决策 #40：可续期，过期不强制重新激活；一个单位至多一条未作废授权码）
 CREATE TABLE IF NOT EXISTS license (
     code        TEXT     NOT NULL PRIMARY KEY,
     unit_id     TEXT     NOT NULL REFERENCES unit (id) ON DELETE CASCADE,
@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS license (
 
 CREATE INDEX IF NOT EXISTS idx_license_unit_id ON license (unit_id);
 CREATE INDEX IF NOT EXISTS idx_license_status ON license (status);
+-- 一个单位至多一条未作废授权码；已作废的历史行保留审计轨迹，不占用名额
+CREATE UNIQUE INDEX IF NOT EXISTS uq_license_active_unit
+    ON license (unit_id) WHERE status <> 'revoked';
 
 -- 单位令牌（决策 #29：写接口 Bearer 凭证，只存哈希，随授权作废/换机失效）
 CREATE TABLE IF NOT EXISTS unit_token (

@@ -12,6 +12,7 @@
 - [级联规则](#级联规则)
 - [索引清单](#索引清单)
 - [隐私与红线](#隐私与红线)
+- [过期刷新令牌清理](#过期刷新令牌清理)
 - [迁移流程](#迁移流程)
 
 ---
@@ -80,6 +81,8 @@ erDiagram
 | status | TEXT CHECK | `active` / `expired`（惰性判定）/ `revoked` |
 | renewed_at / renew_count | BIGINT / SMALLINT | 续期审计与次数 |
 | created_at / updated_at | BIGINT | |
+
+约束：`uq_license_active_unit`——**一个单位至多一条未作废授权码**（部分唯一索引 `WHERE status <> 'revoked'`，已作废历史行保留审计轨迹不占名额）。换码路径（自助换机 `POST /units/rebind`、后台放行）统一「先作废旧码、再签发新码」，同一事务完成。
 
 ### `unit_token` — 单位激活令牌（管理端 Bearer）
 
@@ -183,7 +186,7 @@ erDiagram
 |----|------|------|
 | refresh_token | (admin_user_id), (expires_at) | 删全部会话 / 过期清理 |
 | unit | (parent_id), (status, level) | 树查询 / 列表过滤 |
-| license | (unit_id), (status) | 单位详情 / 状态筛选 |
+| license | (unit_id), (status), UNIQUE(unit_id) WHERE status≠revoked | 单位详情 / 状态筛选 / 单位至多一条未作废授权码 |
 | unit_token | (unit_id, install_id), (license_code) | 换机失效 / 级联作废 |
 | rebind_request | (unit_id, month_key), (status) | 月限计数 / 待放行队列 |
 | config_template | (unit_id), UNIQUE(id) WHERE published | 单位模板 / published 唯一性 |
@@ -203,12 +206,19 @@ erDiagram
 
 红线由 `tests/schema.test.ts` 断言把关（列清单白名单，出现敏感列即测试失败）。
 
+## 过期刷新令牌清理
+
+登出/改密会删除该管理员的刷新令牌；但长期不登出、token 自然过期的失效会话会留死行。每次后台登录（`POST /api/v1/admin/auth/login`）成功后顺手删除过期刷新令牌（走 `idx_refresh_token_expires_at`，见 `server/utils/routes/admin-auth.ts`）。
+
 ## 迁移流程
 
 ```sh
 # 权威 DDL 变更（在 SCES-Server 仓库改 schema-web.sql 并 verify 通过后）
 pnpm sync:contracts        # 镜像更新 supabase/migrations/0001_init.sql
-pnpm db:migrate            # 幂等应用到 Supabase（schema_migrations 记版本）
+pnpm db:migrate            # 应用到 Supabase（schema_migrations 记版本，已应用自动跳过）
 ```
 
-当前为单文件 `0001_init.sql` 全量幂等 DDL（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`）。破坏性变更时新增 `0002_*.sql` 并在 `scripts/apply-migrations.mjs` 按文件名序应用。
+`0001_init.sql` 为全量幂等建库 DDL（`CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`）。
+破坏性变更新增 `0002_*.sql` 等，`scripts/apply-migrations.mjs` 按文件名序应用，
+`schema_migrations` 记录已应用版本，重复执行自动跳过（当前已含 `0002_enable_rls.sql`：
+启用行级安全并回收 Data API 角色的表权限，见文件头注释）。

@@ -21,7 +21,7 @@ import {
   toUnitSummaryRow,
 } from '../repos/admin-units.js'
 import { findTemplateVersion, type UnitConfig } from '../repos/config-templates.js'
-import { effectiveLicenseStatus, findLicenseByCode, issueLicense } from '../repos/licenses.js'
+import { effectiveLicenseStatus, findActiveLicenseForUnit, findLicenseByCode, issueLicense } from '../repos/licenses.js'
 import { findUnitById } from '../repos/units.js'
 
 const createUnitBodySchema = z.strictObject({
@@ -82,18 +82,17 @@ adminUnitsRouter.post('/admin/units', async (c) => {
 
   const expiresAt = body.level === 2 ? monthsToExpiresAt(body.licenseMonths ?? 12) : null
 
-  await insertUnit(db, {
-    id: body.unitId,
-    name: body.name,
-    unitType,
-    parentId: body.level === 2 ? (body.parentId as string) : null,
-    level: body.level,
+  // 建单位与签首发个授权码同事务：授权码签发失败时不留无授权的孤儿单位
+  const { code } = await db.transaction<{ code: string | null }>(async (tx) => {
+    await insertUnit(tx, {
+      id: body.unitId,
+      name: body.name,
+      unitType,
+      parentId: body.level === 2 ? (body.parentId as string) : null,
+      level: body.level,
+    })
+    return { code: body.level === 2 ? await issueLicense(tx, body.unitId, expiresAt as number) : null }
   })
-
-  let code: string | null = null
-  if (body.level === 2) {
-    code = await issueLicense(db, body.unitId, expiresAt as number)
-  }
   await recordAudit(db, { adminUserId: auth.adminUserId, action: 'unit-create', target: body.unitId, ip: c.req.header('x-forwarded-for') ?? null })
 
   return c.json({
@@ -157,12 +156,25 @@ adminUnitsRouter.post('/admin/units/:unitId/licenses', async (c) => {
   const unit = await findUnitById(db, unitId)
   if (unit === undefined) throw notFound('单位不存在')
   if (unit.level !== 2) throw badRequest('仅二级单位可签发授权码')
+  // 契约/DDL 约束：一个单位至多一条未作废授权码（换码路径走「先作废再签发」）
+  if (await findActiveLicenseForUnit(db, unitId) !== undefined) {
+    throw conflict('该单位已有未作废授权码')
+  }
 
   const parsed = issueLicenseBodySchema.safeParse(await readJsonObject(c))
   if (!parsed.success) throw badRequest()
 
   const expiresAt = monthsToExpiresAt(parsed.data.months)
-  const code = await issueLicense(db, unitId, expiresAt)
+  let code: string
+  try {
+    code = await issueLicense(db, unitId, expiresAt)
+  } catch (err) {
+    // 并发双发：预检已过但另一请求抢先签发 → 部分唯一索引 23505，转契约冲突文案
+    if (typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
+      throw conflict('该单位已有未作废授权码')
+    }
+    throw err
+  }
   await recordAudit(db, { adminUserId: auth.adminUserId, action: 'license-issue', target: code, ip: c.req.header('x-forwarded-for') ?? null })
   return c.json({ ok: true as const, data: { code, expiresAt } })
 })

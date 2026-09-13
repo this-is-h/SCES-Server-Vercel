@@ -196,6 +196,19 @@ describe('后台管理接口 18–21', () => {
       expect(data.code).toMatch(/^[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/)
     })
 
+    it('同一单位已有未作废授权码时再次签发返回 409', async () => {
+      const first = await call('POST', `/api/v1/admin/units/${UNIT}/licenses`, { months: 6 })
+      expect(first.status).toBe(200)
+      const again = await call('POST', `/api/v1/admin/units/${UNIT}/licenses`, { months: 6 })
+      expect(again.status).toBe(409)
+      expect(await readError(again)).toBe('该单位已有未作废授权码')
+      // 作废后可重新签发（部分唯一索引只约束未作废行）
+      const { code } = await readData<{ code: string }>(first)
+      await call('POST', `/api/v1/admin/licenses/${code}/revoke`, { reason: 'rotate' })
+      const rotated = await call('POST', `/api/v1/admin/units/${UNIT}/licenses`, { months: 6 })
+      expect(rotated.status).toBe(200)
+    })
+
     it('作废后激活链失效且幂等', async () => {
       const { code } = await readData<{ code: string }>(
         await call('POST', `/api/v1/admin/units/${UNIT}/licenses`, { months: 12 }),

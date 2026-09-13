@@ -1947,6 +1947,11 @@
 
 为指定二级单位签发新授权码。落审计日志。
 
+契约约束：**一个单位至多一条未作废授权码**（DDL 部分唯一索引
+`uq_license_active_unit ON license (unit_id) WHERE status <> 'revoked'`）。
+已有未作废授权码时返回 409；换码统一走「先作废旧码、再签发新码」
+（自助换机 `POST /api/v1/units/rebind` 与后台放行均为同事务）。
+
 鉴权：`adminToken`
 
 参数：
@@ -1969,6 +1974,7 @@
 | `400` | 参数错误 | `{ ok: false, error }` |
 | `401` | 未认证（缺少或无效令牌） | `{ ok: false, error }` |
 | `404` | 资源不存在 | `{ ok: false, error }` |
+| `409` | 该单位已有未作废授权码 | `{ ok: false, error }` |
 | `500` | 服务端异常 | `{ ok: false, error }` |
 
 成功响应 `data` 字段：
@@ -2002,6 +2008,15 @@
 {
   "ok": false,
   "error": "资源不存在"
+}
+```
+
+`409` 响应示例（alreadyLicensed）：
+
+```json
+{
+  "ok": false,
+  "error": "该单位已有未作废授权码"
 }
 ```
 
