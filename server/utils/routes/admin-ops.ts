@@ -3,7 +3,8 @@ import type { AppEnv } from '../http/env.js'
 import { readOptionalJsonObject } from '../http/parse.js'
 import { recordAudit } from '../lib/audit.js'
 import { badRequest, conflict, notFound } from '../lib/errors.js'
-import { findLicenseByCode, issueLicense } from '../repos/licenses.js'
+import { findActiveLicenseForUnit, findLicenseByCode, issueLicense, revokeLicense } from '../repos/licenses.js'
+import { revokeActiveTokensForLicense } from '../repos/unit-tokens.js'
 import { requireAdminToken } from './admin-auth.js'
 
 
@@ -131,33 +132,38 @@ adminOpsRouter.post('/admin/rebinds/:rebindId/approve', async (c) => {
     return c.json({ ok: true as const, data: { id: rebindId, status: 'rejected' as const, code: null, expiresAt: null } })
   }
 
-  // 放行：作废旧授权码（级联失效令牌），签发新码，期限与旧码一致
-  const oldCode = rebind.old_code
-  if (oldCode !== null) {
-    const old = await findLicenseByCode(db, oldCode)
-    if (old !== undefined && old.status !== 'revoked') {
-      await db.query(`UPDATE license SET status = 'revoked', updated_at = $2 WHERE code = $1`, [oldCode, Date.now()])
-      await db.query(`UPDATE unit_token SET status = 'revoked' WHERE license_code = $1 AND status = 'active'`, [oldCode])
-    }
+  // 放行：作废旧授权码（级联失效令牌），按原授权剩余期签发新码；整段同事务
+  // （uq_license_active_unit 只约束未作废行，故须先作废再签发）
+  const old = rebind.old_code === null ? undefined : await findLicenseByCode(db, rebind.old_code)
+  if (old?.status === 'revoked' && (await findActiveLicenseForUnit(db, rebind.unit_id)) !== undefined) {
+    // 旧码已被作废且单位已有新授权码：该放行请求已失效
+    throw conflict('该单位已有未作废授权码')
   }
-  const remainingMs = oldCode !== null
-    ? Math.max(0, ((await findLicenseByCode(db, oldCode))?.expires_at ?? Date.now()) - Date.now())
-    : 30 * 86_400_000
-  const code = await issueLicense(db, rebind.unit_id, Date.now() + remainingMs)
-  await db.query(
-    `UPDATE rebind_request SET status = 'approved', new_code = $2, resolved_at = $3 WHERE id = $1`,
-    [rebindId, code, Date.now()],
-  )
+
+  const result = await db.transaction<{ code: string; expiresAt: number }>(async (tx) => {
+    if (old !== undefined && old.status !== 'revoked') {
+      await revokeLicense(tx, old.code)
+      await revokeActiveTokensForLicense(tx, old.code)
+    }
+    const expiresAt = old?.expires_at ?? Date.now() + 30 * 86_400_000
+    const code = await issueLicense(tx, rebind.unit_id, expiresAt)
+    await tx.query(
+      `UPDATE rebind_request SET status = 'approved', new_code = $2, resolved_at = $3 WHERE id = $1`,
+      [rebindId, code, Date.now()],
+    )
+    return { code, expiresAt }
+  })
+
   await recordAudit(db, {
     adminUserId: auth.adminUserId,
     action: 'rebind-approve',
     target: rebindId,
-    detail: `新码 ${code}`,
+    detail: `新授权码 ${result.code}`,
     ip: c.req.header('x-forwarded-for') ?? null,
   })
   return c.json({
     ok: true as const,
-    data: { id: rebindId, status: 'approved' as const, code, expiresAt: Date.now() + remainingMs },
+    data: { id: rebindId, status: 'approved' as const, code: result.code, expiresAt: result.expiresAt },
   })
 })
 

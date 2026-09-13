@@ -2,9 +2,9 @@
 // ---------------------------------------------------------------------------
 // 迁移执行：把 supabase/migrations/*.sql 按文件名顺序执行到 DATABASE_URL 指向的库。
 //
-// 契约侧 schema-web.sql 全程使用 IF NOT EXISTS，本仓迁移镜像同样幂等 ——
-// 可整段重放，执行过的版本记入 schema_migrations（同 DDL，勿改表名）。
-// 免 supabase CLI：直接用连接串（Supabase 事务池端口 6543，prepare: false）。
+// schema_migrations 记录已应用版本，重复执行自动跳过（幂等）。契约侧
+// schema-web.sql 全程 IF NOT EXISTS，本仓迁移镜像同样幂等 —— 半途失败重跑
+// 也安全。免 supabase CLI：直接用连接串（Supabase 事务池端口 6543，prepare: false）。
 // ---------------------------------------------------------------------------
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -39,7 +39,23 @@ async function main() {
   const sql = postgres(databaseUrl, { max: 1, prepare: false, connect_timeout: 15 })
 
   try {
+    // schema_migrations 是应用状态的权威记录：先确保表存在（与 0001 同 DDL），
+    // 再按已应用版本过滤 —— 重复执行不再重放 DDL（DDL 虽全部 IF NOT EXISTS 幂等，
+    // 但重放无谓消耗，且并非所有后续迁移都严格可重放，如 0002 的 RLS 回收权限）。
+    await sql.unsafe(`CREATE TABLE IF NOT EXISTS schema_migrations (
+        version    TEXT NOT NULL PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )`)
+
+    const appliedRows = await sql`SELECT version FROM schema_migrations`
+    const applied = new Set(appliedRows.map((row) => row.version))
+
     for (const name of files) {
+      if (applied.has(name)) {
+        console.log(`跳过 ${name}（已应用）`)
+        continue
+      }
+
       const content = readFileSync(join(migrationsDir, name), 'utf8')
       await sql.unsafe(content)
       await sql`
@@ -55,7 +71,11 @@ async function main() {
       FROM information_schema.tables
       WHERE table_schema = 'public'
     `
-    console.log(`public 架构表数量：${count}`)
+    const [{ applied_count: appliedCount }] = await sql`
+      SELECT count(*)::int AS applied_count
+      FROM schema_migrations
+    `
+    console.log(`public 架构表数量：${count}；已应用迁移：${appliedCount}`)
   } finally {
     await sql.end({ timeout: 5 })
   }

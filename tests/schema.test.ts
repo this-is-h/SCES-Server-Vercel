@@ -66,4 +66,15 @@ describe('建库 DDL 镜像（supabase/migrations/0001_init.sql）', () => {
     expect(columns).toContain('token_hash')
     expect(columns).not.toContain('token')
   })
+
+  it('契约：license 含部分唯一索引 uq_license_active_unit（一个单位至多一条未作废授权码）', async () => {
+    const rows = await ctx.db.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes
+       WHERE tablename = 'license' AND indexname = 'uq_license_active_unit'`,
+    )
+    expect(rows).toHaveLength(1)
+    const row = rows[0]!
+    expect(row.indexdef).toContain('UNIQUE')
+    expect(row.indexdef).toContain('WHERE (status <>')
+  })
 })

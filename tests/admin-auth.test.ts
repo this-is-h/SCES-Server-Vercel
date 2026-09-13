@@ -198,4 +198,24 @@ describe('后台认证（接口 14–17）', () => {
     const res = await authed(forged, '/api/v1/admin/auth/logout')
     expect(res.status).toBe(401)
   })
+
+  it('接口 14：登录顺手清扫过期刷新令牌，登录自身插入的新令牌保留', async () => {
+    await seedAdmin('sweeper', 'sweep-password-1')
+    const now = Date.now()
+    await ctx.db.query(
+      `INSERT INTO refresh_token (id, admin_user_id, token_hash, expires_at, created_at)
+       VALUES ('r-expired', (SELECT id FROM admin_user WHERE username = 'sweeper'), 'rh1', $1, 1),
+              ('r-live',    (SELECT id FROM admin_user WHERE username = 'sweeper'), 'rh2', $2, 1)`,
+      [now - 1000, now + 86_400_000],
+    )
+    await loginOk('sweeper', 'sweep-password-1')
+    const rows = await ctx.db.query<{ id: string; expires_at: number }>(
+      `SELECT id, expires_at FROM refresh_token ORDER BY id`,
+    )
+    // 过期行已删除；未过期行保留；本次登录另插入一条新令牌（库内只存哈希，id 为 UUID）
+    expect(rows.map((row) => row.id)).not.toContain('r-expired')
+    expect(rows.map((row) => row.id)).toContain('r-live')
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row) => row.expires_at > Date.now())).toBe(true)
+  })
 })

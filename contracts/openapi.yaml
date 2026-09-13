@@ -1745,7 +1745,13 @@ paths:
     post:
       tags: [后台单位与授权]
       summary: 签发授权码（接口 19）
-      description: 为指定二级单位签发新授权码。落审计日志。
+      description: |
+        为指定二级单位签发新授权码。落审计日志。
+
+        契约约束：**一个单位至多一条未作废授权码**（DDL 部分唯一索引
+        `uq_license_active_unit ON license (unit_id) WHERE status <> 'revoked'`）。
+        已有未作废授权码时返回 409；换码统一走「先作废旧码、再签发新码」
+        （自助换机 `POST /api/v1/units/rebind` 与后台放行均为同事务）。
       operationId: adminIssueLicense
       security:
         - adminToken: []
@@ -1782,6 +1788,14 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 该单位已有未作废授权码
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+              examples:
+                alreadyLicensed:
+                  value: { ok: false, error: '该单位已有未作废授权码' }
         '500': { $ref: '#/components/responses/ServerError' }
 
   /api/v1/admin/licenses/{code}/revoke:
@@ -2285,7 +2299,3 @@ paths:
                 additionalProperties: false
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/ServerError' }
-
-
-
-
