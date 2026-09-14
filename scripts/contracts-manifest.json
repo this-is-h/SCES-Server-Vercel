@@ -1,5 +1,5 @@
 {
-  "contracts/openapi.yaml": "021ee25bab40182abdd1c0574086014d84d30ee01dd4e1939e70a222de31612e",
+  "contracts/openapi.yaml": "7caf93b5e509be2b4a9cb3f91908068cab999aecf8a74398e536fd9b9a1a6550",
   "contracts/unit-config.schema.json": "15dc5ba27493d80a7e2a2fb8fa34e8bb37a7405c7ab0749b4273f483a1bd82f0",
   "contracts/schema-web.sql": "f1de8f710e538439bf970dee88dcf8fbf30e82f1deeead77422aedbb64801c5d",
   "contracts/schema-d1.sql": "716243ad98722445ebcccf6fa3127e37943eda85ad78db951411559def6f303d",

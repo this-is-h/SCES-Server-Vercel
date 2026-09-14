@@ -1,0 +1,18 @@
+# gitleaks 配置
+#
+# 复用官方默认规则集，仅对以下受控镜像/清单文件做路径豁免：
+#   contracts/openapi.yaml            SCES-Server 契约镜像，含文档示例凭证占位（如 password: 'change-me-please'）
+#   server/utils/schemas/unit-config.schema.json  契约 schema 运行时镜像
+#   scripts/contracts-manifest.json  各镜像文件的 sha256 清单（64 位十六进制哈希会被
+#                                     generic-api-key 规则误判为密钥）
+# 以上均非真实密钥载体；--redact 会脱敏 secret/raw 内容，故只能以 paths 豁免（路径不参与脱敏）。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "API 契约镜像与清单文件含示例凭证/哈希占位，非真实密钥，整体豁免扫描"
+paths = [
+  '''openapi\.yaml''',
+  '''unit-config\.schema\.json''',
+  '''contracts-manifest\.json''',
+]

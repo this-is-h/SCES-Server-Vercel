@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  branch-name:
+    name: 分支名校验（简化版 Git Flow）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: 校验分支前缀
+        run: |
+          ref="${{ github.ref_name }}"
+          case "$ref" in
+            main|develop|feature/*|bugfix/*|hotfix/*|chore/*|release/*)
+              ;;
+            *)
+              echo "::error::分支名违规：$ref"
+              exit 1
+              ;;
+          esac
+
+  verify:
+    name: 类型检查 + 契约校验 + 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # 锁文件与 registry 无关；显式用公共源，保证 audit 端点可用
+      # （本机/组织级 npmrc 若指到 npmmirror 等镜像则无 audit 端点）。
+      - run: npm config set registry https://registry.npmjs.org/
+      - run: pnpm install --frozen-lockfile
+      - name: 校验门禁（type-check + 契约镜像比对 + vitest）
+        run: pnpm verify
+
+  supply-chain-audit:
+    name: 供应链安全检查（生产依赖）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: npm config set registry https://registry.npmjs.org/
+      - run: pnpm install --frozen-lockfile
+      # 只审生产依赖：vercel CLI 等 dev 工具不上生产运行时，
+      # 全量审计会把构建工具链的告警误报为门禁失败。
+      - run: pnpm audit --prod --audit-level high
+
+  gitleaks:
+    name: 密钥泄漏扫描
+    runs-on: ubuntu-latest
+    # pull_request 事件下 action 走 ScanPullRequest 分支，需调用 PR API 拉取
+    # commit 列表；缺 pull-requests: read 时首调即 403，扫描根本没开始。
+    # 其余 job 仍只持 contents: read（最小权限）。
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
