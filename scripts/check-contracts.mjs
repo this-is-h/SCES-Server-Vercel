@@ -18,7 +18,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = resolve(process.env.SCES_CONTRACTS_SOURCE ?? join(root, '..', 'SCES-Server', 'contracts'))
 const manifestPath = join(root, 'scripts/contracts-manifest.json')
 
-const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
+// 归一化 CRLF→LF 后再哈希，避免 Windows 工作树（CRLF）与 CI/git blob（LF）因行尾产生漂移。
+const sha256 = (buf) => createHash('sha256').update(buf.toString('utf8').replace(/\r\n/g, '\n')).digest('hex')
 const toPosix = (p) => p.replaceAll('\\', '/')
 
 function fail(relPath, reason) {

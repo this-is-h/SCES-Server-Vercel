@@ -53,7 +53,8 @@ function buildApiDoc(contractMd) {
 ${index}${details}`
 }
 
-const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
+// 归一化 CRLF→LF 后再哈希，避免 Windows 工作树（CRLF）与 CI/git blob（LF）因行尾产生漂移。
+const sha256 = (buf) => createHash('sha256').update(buf.toString('utf8').replace(/\r\n/g, '\n')).digest('hex')
 
 function collectTargets() {
   const targets = new Map() // 目标相对路径 -> 源绝对路径
