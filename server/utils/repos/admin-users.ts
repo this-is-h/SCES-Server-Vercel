@@ -22,6 +22,11 @@ export async function findAdminByUsername(db: Db, username: string): Promise<Adm
   return rows[0]
 }
 
+export async function findAdminById(db: Db, id: string): Promise<AdminUserRow | undefined> {
+  const rows = await db.query<AdminUserRow>(`SELECT * FROM admin_user WHERE id = $1`, [id])
+  return rows[0]
+}
+
 export async function countAdmins(db: Db): Promise<number> {
   const rows = await db.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM admin_user`)
   return rows[0]?.count ?? 0
@@ -46,7 +51,7 @@ export async function updateAdminPassword(
   mustChangePassword: boolean,
 ): Promise<void> {
   await db.query(
-    `UPDATE admin_user SET password_hash = $2, must_change_password = $3, updated_at = $4 WHERE id = $1`,
+    `UPDATE admin_user SET password_hash = $2, must_change_password = $3, updated_at = GREATEST(updated_at + 1, $4) WHERE id = $1`,
     [adminUserId, passwordHash, mustChangePassword ? 1 : 0, Date.now()],
   )
 }

@@ -10,6 +10,8 @@ export const APPLY_STATUS_ORDER: Record<ApplyStatus, number> = {
   confirmed: 4,
 }
 
+const APPLY_STATUS_SQL_RANK: Record<ApplyStatus, number> = APPLY_STATUS_ORDER
+
 export type ApplyStatusRow = {
   apply_id_hash: string
   unit_id: string
@@ -35,9 +37,9 @@ export type ApplyStatusRecord = {
 }
 
 /** 当前（最大轮次）状态行。 */
-export async function findLatestRound(db: Db, applyIdHash: string): Promise<ApplyStatusRow | undefined> {
+export async function findLatestRound(db: Db, applyIdHash: string, lock = false): Promise<ApplyStatusRow | undefined> {
   const rows = await db.query<ApplyStatusRow>(
-    `SELECT * FROM apply_status WHERE apply_id_hash = $1 ORDER BY review_round DESC LIMIT 1`,
+    `SELECT * FROM apply_status WHERE apply_id_hash = $1 ORDER BY review_round DESC LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
     [applyIdHash],
   )
   return rows[0]
@@ -63,7 +65,8 @@ export async function insertRegistered(
   const at = Date.now()
   await db.query(
     `INSERT INTO apply_status (apply_id_hash, unit_id, batch_id, review_round, status, latest_revision, created_at, updated_at)
-     VALUES ($1, $2, $3, 1, 'submitted', $4, $5, $5)`,
+     VALUES ($1, $2, $3, 1, 'submitted', $4, $5, $5)
+     ON CONFLICT (apply_id_hash, review_round) DO NOTHING`,
     [input.applyIdHash, input.unitId, input.batchId, input.revision, at],
   )
   return at
@@ -99,14 +102,16 @@ export async function advanceStatus(
   if (input.revision !== undefined) {
     await db.query(
       `UPDATE apply_status SET status = $3, imported_revision = $4, imported_at = $5, updated_at = $5
-       WHERE apply_id_hash = $1 AND review_round = $2`,
-      [input.applyIdHash, input.reviewRound, input.status, input.revision, at],
+       WHERE apply_id_hash = $1 AND review_round = $2
+         AND CASE status WHEN 'draft' THEN 0 WHEN 'submitted' THEN 1 WHEN 'imported' THEN 2 WHEN 'reviewing' THEN 3 WHEN 'confirmed' THEN 4 END <= $6`,
+      [input.applyIdHash, input.reviewRound, input.status, input.revision, at, APPLY_STATUS_SQL_RANK[input.status]],
     )
   } else {
     await db.query(
       `UPDATE apply_status SET status = $3, updated_at = $4
-       WHERE apply_id_hash = $1 AND review_round = $2`,
-      [input.applyIdHash, input.reviewRound, input.status, at],
+       WHERE apply_id_hash = $1 AND review_round = $2
+         AND CASE status WHEN 'draft' THEN 0 WHEN 'submitted' THEN 1 WHEN 'imported' THEN 2 WHEN 'reviewing' THEN 3 WHEN 'confirmed' THEN 4 END <= $5`,
+      [input.applyIdHash, input.reviewRound, input.status, at, APPLY_STATUS_SQL_RANK[input.status]],
     )
   }
   return at
@@ -129,7 +134,8 @@ export async function insertReviewRound(
   await db.query(
     `INSERT INTO apply_status
        (apply_id_hash, unit_id, batch_id, review_round, status, latest_revision, imported_revision, imported_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, 'reviewing', $5, $6, $7, $8, $8)`,
+     VALUES ($1, $2, $3, $4, 'reviewing', $5, $6, $7, $8, $8)
+     ON CONFLICT (apply_id_hash, review_round) DO NOTHING`,
     [
       input.applyIdHash,
       input.unitId,

@@ -22,7 +22,9 @@ export const requireUnitToken = createMiddleware<AppEnv>(async (c, next) => {
 
   const row = await findTokenAuthByHash(c.get('db'), sha256Hex(token))
   if (row === undefined) throw unauthorized()
-  if (row.token_status !== 'active' || row.token_expires_at <= Date.now()) throw unauthorized()
+  const isLicenseStatusRead = c.req.method === 'GET' && c.req.path.endsWith('/license/status')
+  if (row.token_status !== 'active' || (!isLicenseStatusRead && row.token_expires_at <= Date.now())) throw unauthorized()
+  if (row.license_status === 'revoked') throw forbidden('授权码已作废')
   if (row.unit_status !== 'active') throw forbidden('授权已失效，请重新激活')
 
   c.set('unitAuth', {

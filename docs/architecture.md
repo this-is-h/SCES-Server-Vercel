@@ -53,7 +53,7 @@
    └─ toWebRequest(event) → app.fetch()（h3 → Hono 零适配桥接）
 3. Hono 中间件链（app.ts createHonoApp 工厂）：
    a. 注入 db 到 context（c.set('db', ...)）
-   b. 严格限流（authorize/login/register/query 四端点，先于路由注册）
+   b. PostgreSQL 共享限流（authorize/login/refresh/rebind/register/query，先于路由注册）
 4. 路由 handler（routes/authorize.ts）：
    a. zod strict 解析请求体（失败 → ApiError 400）
    b. 仓储层查询/事务（repos/，经事务保证多表写入原子性）
@@ -87,8 +87,8 @@
 | 令牌 | 算法/存储 | TTL | 失效时机 |
 |------|-----------|-----|----------|
 | 单位令牌 unitToken | 明文仅下发一次；库中 `token_hash`（SHA-256，UNIQUE） | 跟随授权码 `expires_at` | 换机（旧 installId 全失效）、授权码作废（级联）、单位删除（级联） |
-| 后台访问令牌 accessToken | HS256 JWT（`TOKEN_SIGNING_SECRET`），无状态 | 15 分钟 | 自然过期（刷新换新） |
-| 后台刷新令牌 refreshToken | 明文仅下发一次；库中 SHA-256 | 30 天 | 登出（删全部）、改密（删全部）、删除（过期惰性） |
+| 后台访问令牌 accessToken | HS256 JWT（`TOKEN_SIGNING_SECRET`），回查管理员版本 | 15 分钟；JWT exp 使用秒 | 自然过期、账号删除、改密后版本失效 |
+| 后台刷新令牌 refreshToken | 明文仅下发一次；库中 SHA-256 | 30 天绝对有效期 | 每次刷新轮换；登出删除指定会话；改密删除全部会话 |
 
 实现：`server/utils/lib/admin-token.ts`（sign/verify）、`server/utils/http/guards.ts`（`requireUnitToken` 联表校验令牌→授权→单位三级状态）、`server/utils/routes/admin-auth.ts`（后台会话）。
 
@@ -96,7 +96,7 @@
 
 ### 限流
 
-`http/rate-limit.ts`：实例内固定窗口，键 `(path, clientIp)`，60s/30 次，惰性清理防膨胀。有状态中间件在 `createHonoApp` 工厂内创建——每个应用实例独立计数（测试与部署互不串扰）。多实例语义限制见 [api.md 限流节](./api.md#限流)。
+`http/rate-limit.ts`：PostgreSQL 固定窗口，键为 `(method, routePath, clientIp)` 的 SHA-256，60s/30 次；同库的 Vercel 实例共享计数，动态申请 ID 不会产生独立配额。返回 Retry-After，数据库故障时返回 503；每次过期清理最多删除 1000 个桶。校园共用出口的并发额度仍需在 staging 压测后确定。
 
 ### 契约校验（unit-config）
 
@@ -122,18 +122,18 @@ postgres.js 默认把 BIGINT 列返回为 `string`，PGlite 返回 `number`—�
 
 | 维度 | 实现 |
 |------|------|
-| 运行时 | **PGlite**（WASM Postgres）跑与生产**同一份 DDL**（`supabase/migrations/0001_init.sql`，即契约 schema-web.sql 镜像）——测试库结构 = 生产库结构 |
+| 运行时 | PGlite 执行全部迁移；迁移测试使用真实迁移 runner 检查版本记录、升级、失败回滚和本地快照恢复。不能代替 Supavisor/多进程 PostgreSQL 测试 |
 | 隔离 | 每用例独立内存库 + 独立 Hono 实例（`createHonoApp({ db })`），限流计数互不串扰 |
-| 覆盖 | 96 用例：契约行为（包络/错误文案/状态码）、状态机单调性、限流触发、数据主权红线断言、BIGINT 类型对齐 |
+| 覆盖 | 基础回归 + 接入前业务流程 + 实际后台会话封装 + 迁移和恢复测试；最新实测结果见 production-readiness.md |
 | 门禁 | `pnpm verify` = type-check + 契约镜像逐字节比对 + vitest 全量 |
 
 ## 已知权衡（决策记录）
 
 | 决策 | 理由 | 代价/缓解 |
 |------|------|-----------|
-| 限流为实例内存 | 免费层无共享存储 | 多实例独立计数；语义如实记录，不假装全局 |
+| PostgreSQL 共享限流 | 使用已有数据库 | 需要压测数据库写放大和校园 NAT 配额，不能替代入口 DDoS 防护 |
 | ssr: false | 后台内部系统无需 SEO；省函数调用 | 无 SSR 优势；可接受 |
 | Hono 而非 h3 文件路由 | 契约冻结 + 测试资产保护 | 一层 12 行桥接文件 |
 | `max: 1` 连接池 | Supavisor 事务池模式每实例一连接 | 并发靠池侧复用 |
-| 刷新令牌不轮换 | 简化客户端 | 泄露窗口 30 天；改密/登出即失效 |
+| 刷新令牌一次性轮换 | 缩小重放窗口 | 同标签页共用单飞刷新；响应丢失时需要重新登录 |
 | schema 以受控镜像进 `server/utils/schemas/` | Nitro 不打包 repo 根 `contracts/` | `check:contracts` 保证与镜像逐字节一致 |

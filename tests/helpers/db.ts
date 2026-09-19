@@ -1,12 +1,12 @@
 import { PGlite } from '@electric-sql/pglite'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Db } from '../../server/utils/db/types.js'
 
-const migrationSql = readFileSync(
-  fileURLToPath(new URL('../../supabase/migrations/0001_init.sql', import.meta.url)),
-  'utf8',
-)
+const migrationsDir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url))
+const migrations = readdirSync(migrationsDir).filter((name) => name.endsWith('.sql')).sort()
+  .map((name) => readFileSync(join(migrationsDir, name), 'utf8'))
 
 export interface TestDb {
   db: Db
@@ -31,6 +31,6 @@ function wrap(pg: PGlite): Db {
  */
 export async function createTestDb(): Promise<TestDb> {
   const pg = new PGlite()
-  await pg.exec(migrationSql)
+  for (const sql of migrations) await pg.exec(sql)
   return { db: wrap(pg), close: () => pg.close() }
 }

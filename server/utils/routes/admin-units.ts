@@ -4,6 +4,7 @@ import type { AppEnv } from '../http/env.js'
 import { readJsonObject, readOptionalJsonObject } from '../http/parse.js'
 import { recordAudit } from '../lib/audit.js'
 import { badRequest, conflict, notFound } from '../lib/errors.js'
+import { isUniqueViolation } from '../db/errors.js'
 import { UNIT_ID_PATTERN } from '../lib/hash.js'
 import { isUnitConfig, firstConfigError } from '../schemas/unit-config.js'
 import { requireAdminToken } from './admin-auth.js'
@@ -80,19 +81,32 @@ adminUnitsRouter.post('/admin/units', async (c) => {
     throw notFound('父级单位不存在')
   }
 
+  if (body.parentId !== undefined) {
+    const parent = await findUnitById(db, body.parentId)
+    if (parent !== undefined && body.level === 2 && parent.level !== 1) {
+      throw badRequest('二级单位的父级单位必须为一级')
+    }
+  }
   const expiresAt = body.level === 2 ? monthsToExpiresAt(body.licenseMonths ?? 12) : null
 
   // 建单位与签首发个授权码同事务：授权码签发失败时不留无授权的孤儿单位
-  const { code } = await db.transaction<{ code: string | null }>(async (tx) => {
-    await insertUnit(tx, {
-      id: body.unitId,
-      name: body.name,
-      unitType,
-      parentId: body.level === 2 ? (body.parentId as string) : null,
-      level: body.level,
-    })
-    return { code: body.level === 2 ? await issueLicense(tx, body.unitId, expiresAt as number) : null }
-  })
+  let code: string | null
+  try {
+    ({ code } = await db.transaction<{ code: string | null }>(async (tx) => {
+      await insertUnit(tx, {
+        id: body.unitId,
+        name: body.name,
+        unitType,
+        parentId: body.level === 2 ? (body.parentId as string) : null,
+        level: body.level,
+        configTemplateId: body.level === 2 ? body.templateId : null,
+      })
+      return { code: body.level === 2 ? await issueLicense(tx, body.unitId, expiresAt as number) : null }
+    }))
+  } catch (error) {
+    if (isUniqueViolation(error)) throw conflict('该单位标识已存在')
+    throw error
+  }
   await recordAudit(db, { adminUserId: auth.adminUserId, action: 'unit-create', target: body.unitId, ip: c.req.header('x-forwarded-for') ?? null })
 
   return c.json({
@@ -139,7 +153,7 @@ adminUnitsRouter.delete('/admin/units/:unitId', async (c) => {
   const auth = c.get('adminAuth')
   const unitId = c.req.param('unitId')
   if ((await findUnitById(db, unitId)) === undefined) throw notFound('单位不存在')
-  const deleted = await deleteUnit(db, unitId)
+  const deleted = await db.transaction((tx) => deleteUnit(tx, unitId))
   if (!deleted) throw conflict('该单位下仍有下级单位，请先删除下级单位')
   await recordAudit(db, {
     adminUserId: auth.adminUserId,
@@ -190,8 +204,10 @@ adminUnitsRouter.post('/admin/licenses/:code/revoke', async (c) => {
   const license = await findLicenseByCode(db, code)
   if (license === undefined) throw notFound('授权码不存在')
   if (license.status !== 'revoked') {
-    await db.query(`UPDATE license SET status = 'revoked', updated_at = $2 WHERE code = $1`, [code, Date.now()])
-    await db.query(`UPDATE unit_token SET status = 'revoked' WHERE license_code = $1 AND status = 'active'`, [code])
+    await db.transaction(async (tx) => {
+      await tx.query(`UPDATE license SET status = 'revoked', updated_at = $2 WHERE code = $1`, [code, Date.now()])
+      await tx.query(`UPDATE unit_token SET status = 'revoked' WHERE license_code = $1 AND status = 'active'`, [code])
+    })
     await recordAudit(db, {
       adminUserId: auth.adminUserId,
       action: 'license-revoke',
@@ -217,14 +233,26 @@ adminUnitsRouter.post('/admin/licenses/:code/renew', async (c) => {
   if (!parsed.success) throw badRequest()
 
   const at = Date.now()
-  const base = Math.max(license.expires_at, at)
-  const expiresAt = base + parsed.data.months * 30 * 86_400_000
-  await db.query(
-    `UPDATE license SET expires_at = $2, renewed_at = $3, renew_count = renew_count + 1,
-       status = 'active', updated_at = $3
-     WHERE code = $1`,
-    [code, expiresAt, at],
-  )
+  const extension = parsed.data.months * 30 * 86_400_000
+  const updatedRows = await db.transaction((tx) => tx.query<{ expires_at: number; renew_count: number }>(
+    `UPDATE license SET expires_at = GREATEST(expires_at, $2) + $3,
+       renewed_at = $4, renew_count = renew_count + 1,
+       status = 'active', updated_at = $4
+     WHERE code = $1 AND status <> 'revoked'
+     RETURNING expires_at, renew_count`,
+    [code, at, extension, at],
+  ).then(async (rows) => {
+    const updated = rows[0]
+    if (updated !== undefined) {
+      await tx.query(`UPDATE unit_token SET expires_at = $2 WHERE license_code = $1 AND status = 'active'`, [
+        code,
+        updated.expires_at,
+      ])
+    }
+    return rows
+  }))
+  const updatedLicense = updatedRows[0]
+  if (updatedLicense === undefined) throw conflict('授权码已作废，不可续期')
   await recordAudit(db, {
     adminUserId: auth.adminUserId,
     action: 'license-renew',
@@ -257,11 +285,15 @@ adminUnitsRouter.post('/admin/templates', async (c) => {
   }
   const config = parsed.data.config as unknown as UnitConfig
 
-  // config.unit.parentUnit.unitId 决定归属单位；模板 id 与 unit_id 的一致性由 unit 行存在性把关
+  // 模板属于配置中的二级单位，不能错误地绑定到展示分组。
   const unitInfo = config.unit as { unitId?: string; parentUnit?: { unitId?: string } }
-  const unitId = unitInfo.parentUnit?.unitId ?? unitInfo.unitId
+  const unitId = unitInfo.unitId
   if (unitId === undefined || (await findUnitById(db, unitId)) === undefined) throw notFound('单位不存在')
 
+  const versionsForTemplate = await listTemplateVersions(db, config.id)
+  if (versionsForTemplate.some((version) => version.unit_id !== unitId)) {
+    throw conflict('模板 ID 已归属于其他单位')
+  }
   if (await findTemplateVersion(db, config.id, config.version, config.revision)) {
     const existing = (await findTemplateVersion(db, config.id, config.version, config.revision)) as { status: string }
     if (existing.status !== 'draft') throw conflict('该版本已发布，请升修订号后再上传')

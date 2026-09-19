@@ -222,3 +222,7 @@ pnpm db:migrate            # 应用到 Supabase（schema_migrations 记版本，
 破坏性变更新增 `0002_*.sql` 等，`scripts/apply-migrations.mjs` 按文件名序应用，
 `schema_migrations` 记录已应用版本，重复执行自动跳过（当前已含 `0002_enable_rls.sql`：
 启用行级安全并回收 Data API 角色的表权限，见文件头注释）。
+
+`0003_production_hardening.sql` 增加 `batch.key_id`、`unit.config_template_id` 和第 12 张表 `rate_limit_bucket`，并增加活跃安装令牌唯一索引。已有批次的 key_id 保留 NULL，不伪造历史加密密钥标识；补齐前不得向学生端发布该批次。迁移会将同一安装实例重复的活跃令牌仅保留最新一条，其余标记 revoked，需要在 staging 核对客户端影响。
+
+迁移 runner 使用事务级锁，版本记录使用 BIGINT 毫秒，支持修复历史 INTEGER 版本列。测试覆盖全新库、旧版结构、失败回滚和 PGlite 本地恢复；真实 Supabase 升级和 pg_dump 恢复另行验收。

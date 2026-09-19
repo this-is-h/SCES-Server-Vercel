@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import type { AppEnv } from '../http/env.js'
-import { readOptionalJsonObject } from '../http/parse.js'
+import { readOptionalJsonObject, clientIp } from '../http/parse.js'
 import { recordAudit } from '../lib/audit.js'
 import { badRequest, conflict, notFound } from '../lib/errors.js'
-import { findActiveLicenseForUnit, findLicenseByCode, issueLicense, revokeLicense } from '../repos/licenses.js'
+import { findActiveLicenseForUnit, issueLicense, revokeLicense, type LicenseRow } from '../repos/licenses.js'
 import { revokeActiveTokensForLicense } from '../repos/unit-tokens.js'
 import { requireAdminToken } from './admin-auth.js'
 
@@ -17,6 +17,7 @@ type BatchRow = {
   status: string
   apply_start_at: number | null
   apply_end_at: number | null
+  key_id: string | null
   calc_mode: string
   calc_config: string
   public_key_jwk: string
@@ -37,6 +38,7 @@ function toBatchPublic(row: BatchRow) {
     status: row.status,
     applyStartAt: row.apply_start_at,
     applyEndAt: row.apply_end_at,
+    keyId: row.key_id,
     calcMode: row.calc_mode,
     calcConfig: JSON.parse(row.calc_config),
     publicKeyJwk: JSON.parse(row.public_key_jwk),
@@ -114,57 +116,32 @@ adminOpsRouter.post('/admin/rebinds/:rebindId/approve', async (c) => {
   const rebindId = c.req.param('rebindId')
   const body = await readOptionalJsonObject(c)
   const approve = body.approve === undefined ? true : body.approve === true
-  const reason = typeof body.reason === 'string' ? body.reason : undefined
-
-  const rebind = (await db.query<RebindRow>(`SELECT * FROM rebind_request WHERE id = $1`, [rebindId])).at(0)
-  if (rebind === undefined) throw notFound('换机申请不存在')
-  if (rebind.status !== 'pending') throw conflict('该换机申请无需放行')
-
-  if (!approve) {
-    await db.query(`UPDATE rebind_request SET status = 'rejected', resolved_at = $2 WHERE id = $1`, [rebindId, Date.now()])
-    await recordAudit(db, {
-      adminUserId: auth.adminUserId,
-      action: 'rebind-reject',
-      target: rebindId,
-      detail: reason ?? null,
-      ip: c.req.header('x-forwarded-for') ?? null,
-    })
-    return c.json({ ok: true as const, data: { id: rebindId, status: 'rejected' as const, code: null, expiresAt: null } })
-  }
-
-  // 放行：作废旧授权码（级联失效令牌），按原授权剩余期签发新码；整段同事务
-  // （uq_license_active_unit 只约束未作废行，故须先作废再签发）
-  const old = rebind.old_code === null ? undefined : await findLicenseByCode(db, rebind.old_code)
-  if (old?.status === 'revoked' && (await findActiveLicenseForUnit(db, rebind.unit_id)) !== undefined) {
-    // 旧码已被作废且单位已有新授权码：该放行请求已失效
-    throw conflict('该单位已有未作废授权码')
-  }
-
-  const result = await db.transaction<{ code: string; expiresAt: number }>(async (tx) => {
+  const reason = typeof body.reason === 'string' ? body.reason.slice(0, 200) : undefined
+  const result = await db.transaction(async (tx) => {
+    const rebind = (await tx.query<RebindRow>(`SELECT * FROM rebind_request WHERE id = $1 FOR UPDATE`, [rebindId])).at(0)
+    if (rebind === undefined) throw notFound('换机申请不存在')
+    if (rebind.status !== 'pending') throw conflict('该换机申请无需放行')
+    if (!approve) {
+      await tx.query(`UPDATE rebind_request SET status = 'rejected', resolved_at = $2 WHERE id = $1`, [rebindId, Date.now()])
+      await recordAudit(tx, { adminUserId: auth.adminUserId, action: 'rebind-reject', target: rebindId, detail: reason ?? null, ip: clientIp(c) ?? null })
+      return { id: rebindId, status: 'rejected' as const, code: null, expiresAt: null, auditAction: 'rebind-reject' }
+    }
+    await tx.query(`SELECT id FROM unit WHERE id = $1 FOR UPDATE`, [rebind.unit_id])
+    const old = rebind.old_code === null ? undefined : (await tx.query<LicenseRow>('SELECT * FROM license WHERE code = $1 FOR UPDATE', [rebind.old_code]))[0]
+    if (old?.status === 'revoked' && (await findActiveLicenseForUnit(tx, rebind.unit_id)) !== undefined) {
+      throw conflict('该单位已有未作废授权码')
+    }
     if (old !== undefined && old.status !== 'revoked') {
       await revokeLicense(tx, old.code)
       await revokeActiveTokensForLicense(tx, old.code)
     }
     const expiresAt = old?.expires_at ?? Date.now() + 30 * 86_400_000
     const code = await issueLicense(tx, rebind.unit_id, expiresAt)
-    await tx.query(
-      `UPDATE rebind_request SET status = 'approved', new_code = $2, resolved_at = $3 WHERE id = $1`,
-      [rebindId, code, Date.now()],
-    )
-    return { code, expiresAt }
+    await tx.query(`UPDATE rebind_request SET status = 'approved', new_code = $2, resolved_at = $3 WHERE id = $1`, [rebindId, code, Date.now()])
+    await recordAudit(tx, { adminUserId: auth.adminUserId, action: 'rebind-approve', target: rebindId, detail: reason ?? null, ip: clientIp(c) ?? null })
+    return { id: rebindId, status: 'approved' as const, code, expiresAt, auditAction: 'rebind-approve' }
   })
-
-  await recordAudit(db, {
-    adminUserId: auth.adminUserId,
-    action: 'rebind-approve',
-    target: rebindId,
-    detail: `新授权码 ${result.code}`,
-    ip: c.req.header('x-forwarded-for') ?? null,
-  })
-  return c.json({
-    ok: true as const,
-    data: { id: rebindId, status: 'approved' as const, code: result.code, expiresAt: result.expiresAt },
-  })
+  return c.json({ ok: true as const, data: { id: result.id, status: result.status, code: result.code, expiresAt: result.expiresAt } })
 })
 
 /** 接口 21：审计日志（游标分页，?action/?target/?limit 过滤）。 */
@@ -216,4 +193,3 @@ adminOpsRouter.get('/admin/audit-logs', async (c) => {
     },
   })
 })
-

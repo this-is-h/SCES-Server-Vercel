@@ -6,6 +6,7 @@ export type UnitRow = {
   unit_type: string
   parent_id: string | null
   level: number
+  config_template_id: string | null
   public_key_jwk: string | null
   status: string
   created_at: number

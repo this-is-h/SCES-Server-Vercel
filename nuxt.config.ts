@@ -1,6 +1,14 @@
 import { defineNuxtConfig } from 'nuxt/config'
+import type { ModuleOptions as UiOptions } from '@nuxt/ui'
+
+// UI resolves its font module dependencies before inline module options.
+const uiConfig: { ui: UiOptions } = { ui: { fonts: false } }
+// Nitro 2's automatic detector caps at Node 22; match the Vercel project.
+const deploymentConfig = { nitro: { vercel: { functions: { runtime: 'nodejs24.x' } } } }
 
 export default defineNuxtConfig({
+  ...uiConfig,
+  ...deploymentConfig,
   modules: ['@nuxt/ui'],
 
   css: ['~/assets/css/main.css'],

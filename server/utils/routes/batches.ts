@@ -27,6 +27,7 @@ batchesRouter.post('/batches', requireUnitToken, async (c) => {
   const db = c.get('db')
 
   const body = await readJsonObject(c)
+  if (Object.keys(body).some((key) => key !== 'batch')) throw badRequest()
   const parsed = batchPayloadSchema.safeParse(body.batch)
   if (!parsed.success) throw badRequest()
   const payload = parsed.data
@@ -54,7 +55,9 @@ batchesRouter.post('/batches', requireUnitToken, async (c) => {
     payload.configTemplateVersion,
     payload.configTemplateRevision,
   )
-  if (template === undefined) throw badRequest()
+  if (template === undefined || template.unit_id !== auth.unitId || template.status !== 'published') {
+    throw badRequest('批次配置模板不存在或不属于当前单位')
+  }
 
   let createdAt: number
   try {
@@ -69,12 +72,17 @@ batchesRouter.post('/batches', requireUnitToken, async (c) => {
       calcMode: payload.calcMode,
       calcConfig: JSON.stringify(payload.calcConfig),
       publicKeyJwk: JSON.stringify(payload.publicKeyJwk),
+      keyId: payload.keyId,
       configTemplateId: payload.configTemplateId,
       configTemplateVersion: payload.configTemplateVersion,
       configTemplateRevision: payload.configTemplateRevision,
     })
   } catch (err) {
-    if (isUniqueViolation(err)) throw conflict('该学年学期已存在正式批次')
+    if (isUniqueViolation(err)) {
+      const raced = await findBatchById(db, payload.batchId)
+      if (raced?.unit_id === auth.unitId) return c.json({ ok: true as const, data: { batchId: raced.id, status: raced.status, createdAt: raced.created_at } })
+      throw conflict('该学年学期已存在正式批次')
+    }
     throw err
   }
 
@@ -100,6 +108,7 @@ batchesRouter.post('/batches/:batchId/status', requireUnitToken, async (c) => {
 
   const current = batch.status as BatchStatus
   if (BATCH_STATUS_ORDER[next] < BATCH_STATUS_ORDER[current]) throw conflict('批次状态不允许回退')
+  if (BATCH_STATUS_ORDER[next] > BATCH_STATUS_ORDER[current] + 1) throw conflict('批次状态只能依次推进')
   if (BATCH_STATUS_ORDER[next] === BATCH_STATUS_ORDER[current]) {
     // 同状态重复上报幂等
     return c.json({
@@ -108,7 +117,12 @@ batchesRouter.post('/batches/:batchId/status', requireUnitToken, async (c) => {
     })
   }
 
-  const updatedAt = await updateBatchStatus(db, batchId, next)
+  const updatedAt = await updateBatchStatus(db, batchId, next, current)
+  if (updatedAt === undefined) {
+    const raced = await findBatchById(db, batchId)
+    if (raced?.status === next) return c.json({ ok: true as const, data: { batchId, status: next, updatedAt: raced.updated_at } })
+    throw conflict('批次状态已被其他请求更新，请刷新后重试')
+  }
   return c.json({ ok: true as const, data: { batchId, status: next, updatedAt } })
 })
 
@@ -119,7 +133,13 @@ batchesRouter.get('/batches/active', async (c) => {
 
   const db = c.get('db')
   const unit = await findUnitById(db, unitId)
+  if (unit !== undefined && (unit.status !== 'active' || unit.level !== 2)) {
+    return c.json({ ok: true as const, data: { batch: null } })
+  }
   if (unit === undefined) throw notFound('单位不存在')
+  if (unit.parent_id !== null && (await findUnitById(db, unit.parent_id))?.status !== 'active') {
+    return c.json({ ok: true as const, data: { batch: null } })
+  }
 
   const batch = await findActiveBatch(db, unitId)
   if (batch === undefined) return c.json({ ok: true as const, data: { batch: null } })

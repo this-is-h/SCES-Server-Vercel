@@ -38,7 +38,12 @@ export type UnitConfig = {
 /** 每个模板 id 至多一个 published 版本（DDL 唯一部分索引保证）。 */
 export async function findPublishedTemplate(db: Db, unitId: string): Promise<ConfigTemplateRow | undefined> {
   const rows = await db.query<ConfigTemplateRow>(
-    `SELECT * FROM config_template WHERE unit_id = $1 AND status = 'published'`,
+    `SELECT t.* FROM config_template t
+     LEFT JOIN unit u ON u.id = $1
+     WHERE t.unit_id = $1 AND t.status = 'published'
+       AND (u.config_template_id IS NULL OR t.id = u.config_template_id)
+     ORDER BY t.version DESC, t.revision DESC
+     LIMIT 1`,
     [unitId],
   )
   return rows[0]

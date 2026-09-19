@@ -9,6 +9,7 @@ export type BatchRow = {
   status: string
   apply_start_at: number | null
   apply_end_at: number | null
+  key_id: string | null
   calc_mode: string
   calc_config: string
   public_key_jwk: string
@@ -55,6 +56,7 @@ export async function insertBatch(
     calcMode: string
     calcConfig: string
     publicKeyJwk: string
+    keyId: string
     configTemplateId: string
     configTemplateVersion: number
     configTemplateRevision: number
@@ -63,9 +65,9 @@ export async function insertBatch(
   const at = Date.now()
   await db.query(
     `INSERT INTO batch
-       (id, unit_id, year, semester, is_test, status, apply_start_at, apply_end_at, calc_mode, calc_config,
+       (id, unit_id, year, semester, is_test, status, apply_start_at, apply_end_at, key_id, calc_mode, calc_config,
         public_key_jwk, config_template_id, config_template_version, config_template_revision, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)`,
+     VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)`,
     [
       input.id,
       input.unitId,
@@ -74,6 +76,7 @@ export async function insertBatch(
       input.isTest ? 1 : 0,
       input.applyStartAt,
       input.applyEndAt,
+      input.keyId,
       input.calcMode,
       input.calcConfig,
       input.publicKeyJwk,
@@ -86,10 +89,13 @@ export async function insertBatch(
   return at
 }
 
-export async function updateBatchStatus(db: Db, batchId: string, status: BatchStatus): Promise<number> {
+export async function updateBatchStatus(db: Db, batchId: string, status: BatchStatus, expectedStatus?: BatchStatus): Promise<number | undefined> {
   const at = Date.now()
-  await db.query(`UPDATE batch SET status = $2, updated_at = $3 WHERE id = $1`, [batchId, status, at])
-  return at
+  const rows = await db.query<{ id: string }>(
+    `UPDATE batch SET status = $2, updated_at = $3 WHERE id = $1 AND ($4::text IS NULL OR status = $4) RETURNING id`,
+    [batchId, status, at, expectedStatus ?? null],
+  )
+  return rows.length > 0 ? at : undefined
 }
 
 /** 活跃批次下发（接口 11）：status = 'active' 且未过申请截止；
@@ -116,6 +122,7 @@ export type BatchPublic = {
   status: string
   applyStartAt: number | null
   applyEndAt: number | null
+  keyId: string | null
   calcMode: string
   calcConfig: unknown
   publicKeyJwk: unknown
@@ -136,6 +143,7 @@ export function toBatchPublic(row: BatchRow): BatchPublic {
     status: row.status,
     applyStartAt: row.apply_start_at,
     applyEndAt: row.apply_end_at,
+    keyId: row.key_id,
     calcMode: row.calc_mode,
     calcConfig: JSON.parse(row.calc_config),
     publicKeyJwk: JSON.parse(row.public_key_jwk),

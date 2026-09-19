@@ -9,8 +9,8 @@
 |----|--------------|---------------|
 | 服务地址 | http://127.0.0.1:3100（server/web）/ 8787（cloudflare） | 本地 `http://localhost:3000`；生产 `https://sces.thisish.cn` |
 | 架构标识 | `architecture` 返回 `web` / `cloudflare` | 健康检查固定返回 `web`（`server/utils/constants.ts`） |
-| 限流实现 | 平台差异，契约不断言 | 内存固定窗口 60s/30 次，键 (path, IP)：`POST /authorize`、`POST /admin/auth/login`、`POST /applies/:id/register`、`GET /applies/:id`（`server/utils/app.ts`） |
-| 令牌签发 | — | accessToken HS256 15 分钟（`ACCESS_TOKEN_TTL_MS`）；refreshToken 30 天仅存哈希 |
+| 限流实现 | 平台差异 | PostgreSQL 共享固定窗口 60s/30 次；按 method、路由模板、IP 的 SHA-256 计数，含 authorize/login/refresh/rebind/register/query |
+| 令牌签发 | — | accessToken HS256 15 分钟、JWT exp 为秒；refreshToken 30 天绝对有效期、一次性轮换、仅存哈希 |
 
 ## 通用约定
 
@@ -48,6 +48,7 @@
 | 接口 | 方法 | 路径 | 鉴权 |
 |------|------|------|------|
 | 探活 | `GET` | `/api/v1/health` | 无（公开 / 凭证在路径参数） |
+| 数据库就绪检查 | `GET` | `/api/v1/health/ready` | 无（公开 / 凭证在路径参数） |
 | 授权码核验（接口 1） | `POST` | `/api/v1/authorize` | 无（公开 / 凭证在路径参数） |
 | 单位公钥上报（接口 2） | `POST` | `/api/v1/units/{unitId}/public-key` | `unitToken` |
 | 更换授权设备（接口 3） | `POST` | `/api/v1/units/rebind` | `unitToken` |
@@ -130,6 +131,47 @@
 {
   "ok": false,
   "error": "服务端异常，请稍后重试"
+}
+```
+
+#### 数据库就绪检查
+
+`GET /api/v1/health/ready`
+
+检查服务端是否能够访问数据库。数据库不可用时返回 503。
+
+鉴权：无（公开接口，或以路径中的 `applyId` 为凭证）
+
+响应：
+
+| 状态码 | 说明 | 数据 |
+|--------|------|------|
+| `200` | 数据库可用 | 对象（status / now） |
+| `500` | 服务端异常 | `{ ok: false, error }` |
+| `503` | 服务暂不可用 | `{ ok: false, error }` |
+
+成功响应 `data` 字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `status` | `"ready"` | 是 |  |
+| `now` | `EpochMs` | 是 | epoch 毫秒时间戳。 |
+
+`500` 响应示例（default）：
+
+```json
+{
+  "ok": false,
+  "error": "服务端异常，请稍后重试"
+}
+```
+
+`503` 响应示例（default）：
+
+```json
+{
+  "ok": false,
+  "error": "服务暂不可用，请稍后重试"
 }
 ```
 
@@ -519,7 +561,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `batch` | 对象（batchId / year / semester / isTest / applyStartAt / applyEndAt / calcMode / calcConfig / publicKeyJwk / configTemplateId / configTemplateVersion / configTemplateRevision） | 是 |  |
+| `batch` | 对象（batchId / year / semester / isTest / applyStartAt / applyEndAt / calcMode / calcConfig / publicKeyJwk / keyId / configTemplateId / configTemplateVersion / configTemplateRevision） | 是 |  |
 
 响应：
 
@@ -846,7 +888,7 @@
 |------|------|------|------|
 | `succeeded` | `integer` | 是 |  |
 | `failed` | `integer` | 是 |  |
-| `results` | `ApplyStatusRecord` + 对象[] | 是 |  |
+| `results` | 对象[] | 是 |  |
 
 `400` 响应示例（default）：
 
@@ -1451,7 +1493,7 @@
 
 服务商运维登录。返回 15 分钟访问 token 与可删除的刷新 token（决策 #40）。
 首次启动时若 `admin_user` 为空且配置了 `ADMIN_INITIAL_PASSWORD`，自动创建初始管理员，
-`mustChangePassword` 为 true 时前端强制跳转改密。登录走严格限流。
+`mustChangePassword` 为 true 时前端跳转改密，服务端拒绝其他管理业务操作（403）。登录走严格限流。
 
 鉴权：无（公开接口，或以路径中的 `applyId` 为凭证）
 
@@ -1531,8 +1573,8 @@
 
 `POST /api/v1/admin/auth/refresh`
 
-用刷新 token 换取新的访问 token（决策 #40）。刷新 token 存库，登出即删除；
-已删除或已过期的刷新 token 返回 401。
+用刷新 token 换取新的访问 token（决策 #40）。刷新 token 采用一次性轮换，
+成功后旧 token 立即失效；已删除、已使用或已过期的刷新 token 返回 401。
 
 鉴权：无（公开接口，或以路径中的 `applyId` 为凭证）
 
@@ -1546,7 +1588,7 @@
 
 | 状态码 | 说明 | 数据 |
 |--------|------|------|
-| `200` | 刷新成功 | 对象（accessToken / accessTokenExpiresAt） |
+| `200` | 刷新成功 | 对象（accessToken / accessTokenExpiresAt / refreshToken） |
 | `400` | 参数错误 | `{ ok: false, error }` |
 | `401` | 刷新令牌无效或已过期 | `{ ok: false, error }` |
 | `500` | 服务端异常 | `{ ok: false, error }` |
@@ -1557,6 +1599,7 @@
 |------|------|------|------|
 | `accessToken` | `string` | 是 |  |
 | `accessTokenExpiresAt` | `EpochMs` | 是 | epoch 毫秒时间戳。 |
+| `refreshToken` | `string` | 是 |  |
 
 `400` 响应示例（default）：
 
@@ -2778,7 +2821,7 @@ epoch 毫秒时间戳。
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `kty` | `string` | 是 |  |
+| `kty` | `"RSA"` | 是 |  |
 | `n` | `string` | 是 |  |
 | `e` | `string` | 是 |  |
 | `alg` | `string` | 否 |  |
@@ -2869,6 +2912,7 @@ epoch 毫秒时间戳。
 | `calcMode` | `"weighted"` \| `"formula"` | 是 |  |
 | `calcConfig` | `CalcConfig` | 是 | 计算配置（批次快照，与配置模板 calc 同构）。判别字段 `calcMode`： weighted 仅权重；formula 额外必填 `formula`。与 `unit-config.schema.json#/$defs/calc` 校验强度一致（决策 #35）。 |
 | `publicKeyJwk` | `Jwk` | 是 | 公钥 JWK（RSA-OAEP-256）。私钥永不进入服务端。 |
+| `keyId` | `string` \| `null` | 是 | 历史批次未登记密钥标识时为 null；新建批次必须显式提供。 |
 | `configTemplateId` | `string` | 否 |  |
 | `configTemplateVersion` | `integer` | 否 |  |
 | `configTemplateRevision` | `integer` | 否 |  |

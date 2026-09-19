@@ -16,3 +16,15 @@ export const healthRouter = new Hono<AppEnv>().get('/health', (c) =>
     },
   }),
 )
+
+/** Readiness probe: verifies that the configured database is reachable. */
+healthRouter.get('/health/ready', async (c) => {
+  try {
+    await c.get('db').query(`SELECT b.key_id, u.config_template_id, r.bucket_key
+      FROM batch b CROSS JOIN unit u CROSS JOIN rate_limit_bucket r LIMIT 0`)
+    return c.json({ ok: true as const, data: { status: 'ready' as const, now: Date.now() } })
+  } catch (error) {
+    console.error('readiness probe failed', error)
+    return c.json({ ok: false as const, error: '服务暂不可用，请稍后重试' }, 503)
+  }
+})

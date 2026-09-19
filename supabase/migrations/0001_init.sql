@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS unit (
     unit_type      TEXT     NOT NULL CHECK (unit_type IN ('college', 'department', 'other')),
     parent_id      TEXT     REFERENCES unit (id) ON DELETE RESTRICT,
     level          SMALLINT NOT NULL CHECK (level IN (1, 2)),
+    -- 二级单位绑定的配置模板 ID；具体版本由 config_template.status/version 管理。
+    config_template_id TEXT,
     -- 单位公钥 JWK（JSON 存 TEXT）；私钥永不进入服务端
     public_key_jwk TEXT,
     status         TEXT     NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
@@ -175,6 +177,8 @@ CREATE TABLE IF NOT EXISTS batch (
     calc_mode                TEXT     NOT NULL CHECK (calc_mode IN ('weighted', 'formula')),
     calc_config              TEXT     NOT NULL,
     public_key_jwk           TEXT     NOT NULL,
+    -- 学生端导出文件使用的申请密钥标识；私钥永不进入服务端。
+    key_id                   TEXT,
     config_template_id       TEXT     NOT NULL,
     config_template_version  SMALLINT NOT NULL CHECK (config_template_version >= 1),
     config_template_revision SMALLINT NOT NULL CHECK (config_template_revision >= 0),
@@ -237,3 +241,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_action
     ON audit_log (action);
 CREATE INDEX IF NOT EXISTS idx_audit_log_target
     ON audit_log (target);
+
+-- Shared fixed-window rate limiter for serverless instances. The key is a
+-- SHA-256 digest of route + client address; raw addresses are never persisted.
+CREATE TABLE IF NOT EXISTS rate_limit_bucket (
+    bucket_key   TEXT   NOT NULL PRIMARY KEY,
+    window_start BIGINT NOT NULL,
+    hit_count    INTEGER NOT NULL CHECK (hit_count >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_window_start
+    ON rate_limit_bucket (window_start);

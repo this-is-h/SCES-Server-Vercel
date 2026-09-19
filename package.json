@@ -9,6 +9,11 @@
     "node": ">=22"
   },
   "scripts": {
+    "build": "nuxt build",
+    "build:vercel": "nuxt build --preset vercel",
+    "check:built-api": "node scripts/check-built-api.mjs",
+    "check:environment": "node scripts/inspect-environment.mjs",
+    "check:staging": "node scripts/verify-staging.mjs --execute",
     "prepare": "husky",
     "commitlint": "commitlint --from origin/develop..HEAD",
     "test": "vitest run",
@@ -25,6 +30,7 @@
     "hono": "^4.9.0",
     "nuxt": "^4.5.2",
     "postgres": "^3.4.9",
+    "tailwindcss": "4.3.3",
     "zod": "^4.6.1"
   },
   "devDependencies": {

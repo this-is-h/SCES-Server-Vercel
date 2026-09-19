@@ -35,15 +35,30 @@ authorizeRouter.post('/authorize', async (c) => {
   }
 
   const unitToken = randomToken()
+  let authorizedLicense = license
   await db.transaction(async (tx) => {
+    await tx.query(`SELECT id FROM unit WHERE id = $1 FOR UPDATE`, [license.unit_id])
+    const currentLicense = (await tx.query<typeof license>(
+      `SELECT * FROM license WHERE code = $1 FOR UPDATE`,
+      [license.code],
+    )).at(0)
+    if (currentLicense === undefined) throw forbidden('授权码无效')
+    if (currentLicense.status === 'revoked') throw forbidden('授权码已作废')
+    if (effectiveLicenseStatus(currentLicense) === 'expired') throw forbidden('授权已过期，请联系服务商续期')
+    authorizedLicense = currentLicense
+    const activeOtherInstall = await tx.query<{ install_id: string }>(
+      `SELECT install_id FROM unit_token WHERE unit_id = $1 AND status = 'active' AND install_id <> $2 LIMIT 1`,
+      [license.unit_id, installId],
+    )
+    if (activeOtherInstall.length > 0) throw forbidden('该单位已绑定其他设备，请先申请换机')
     await revokeActiveTokensForInstall(tx, license.unit_id, installId)
     await insertUnitToken(tx, {
       id: randomUUID(),
       unitId: license.unit_id,
       installId,
-      licenseCode: license.code,
+      licenseCode: currentLicense.code,
       tokenHash: sha256Hex(unitToken),
-      expiresAt: license.expires_at,
+      expiresAt: currentLicense.expires_at,
     })
   })
 
@@ -52,7 +67,7 @@ authorizeRouter.post('/authorize', async (c) => {
     data: {
       unit: toUnitSummary(unit),
       unitToken,
-      license: { expiresAt: license.expires_at, status: effectiveLicenseStatus(license) },
+      license: { expiresAt: authorizedLicense.expires_at, status: effectiveLicenseStatus(authorizedLicense) },
       configTemplate: toUnitConfig(template),
     },
   })
