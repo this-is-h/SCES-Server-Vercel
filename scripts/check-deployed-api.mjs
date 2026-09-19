@@ -9,7 +9,8 @@ export function previewUrl(value) {
   return url.origin
 }
 
-export async function checkPreview(base, fetcher = fetch) {
+export async function checkPreview(base, fetcher = fetch, bypassSecret) {
+  base = previewUrl(base)
   const reports = []
   for (const [path, expected, kind] of [
     ['/api/v1/health', 200, 'ok'], ['/api/v1/health/ready', 200, 'ready'],
@@ -17,7 +18,9 @@ export async function checkPreview(base, fetcher = fetch) {
   ]) {
     const report = { path, expected }
     try {
-      const response = await fetcher(`${base}${path}`, { signal: AbortSignal.timeout(25000), redirect: 'manual' })
+      const response = await fetcher(`${base}${path}`, { signal: AbortSignal.timeout(25000), redirect: 'manual',
+        headers: bypassSecret ? { 'x-vercel-protection-bypass': bypassSecret } : {},
+      })
       report.status = response.status
       assert.equal(response.status, expected)
       if (kind === 'html') assert.match(await response.text(), /<html/i)
@@ -43,7 +46,7 @@ export async function checkPreview(base, fetcher = fetch) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const base = previewUrl(process.env.PREVIEW_URL ?? process.argv[2])
-    const checks = await checkPreview(base)
+    const checks = await checkPreview(base, fetch, process.env.VERCEL_AUTOMATION_BYPASS_SECRET)
     console.log(JSON.stringify({ target: base, checks }, null, 2))
     if (checks.some((check) => !check.passed)) process.exitCode = 1
   } catch { console.error('Invalid preview URL'); process.exitCode = 1 }

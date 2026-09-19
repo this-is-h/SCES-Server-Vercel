@@ -14,4 +14,18 @@ describe('external preview acceptance', () => {
     expect(results).toHaveLength(4)
     expect(results.every((row) => row.status === 503 && row.passed === false)).toBe(true)
   })
+  it('sends an optional protection credential only to validated preview targets and never follows redirects', async () => {
+    let calls = 0
+    const mock = async (_url, options) => {
+      calls++
+      expect(options.redirect).toBe('manual')
+      expect(options.headers['x-vercel-protection-bypass']).toBe('fixture-only')
+      return new Response('', { status: 302, headers: { location: 'https://example.com' } })
+    }
+    const results = await checkPreview('https://sces-server-vercel-test.vercel.app', mock, 'fixture-only')
+    expect(calls).toBe(4)
+    expect(JSON.stringify(results)).not.toContain('fixture-only')
+    await expect(checkPreview('https://example.com', mock, 'fixture-only')).rejects.toThrow()
+    expect(calls).toBe(4)
+  })
 })

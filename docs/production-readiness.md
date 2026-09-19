@@ -119,3 +119,5 @@ check-built-api 强制连接关闭的回环端口验证故障行为，不会连�
 契约 PR：https://github.com/this-is-h/SCES-Server/pull/3（已合并 develop）。
 
 服务端 PR：https://github.com/this-is-h/SCES-Server-Vercel/pull/9（全绿后合并 develop，6a7ba63）。修复分支 preview 为 `sces-server-vercel-ko2qcy07a-this-is-hs-projects.vercel.app`，Node 24、hkg1、构建 READY。本机访问该域名连接超时，外部 HTTP 验收未通过，不能把部署成功等同于服务可用；补充 GitHub 只读部署探针以区分本机网络和部署故障。
+
+Vercel 访问保护已只读核实为 `all_except_custom_domains`，当前未配置自动化绕过密钥。不会为了验收关闭访问保护。受保护 preview 的外部验收需要项目所有者生成 Protection Bypass for Automation，并保存到本仓 Actions secret `VERCEL_AUTOMATION_BYPASS_SECRET`；不要发送到聊天或放在 workflow 输入中。`Preview HTTP acceptance` 手动工作流通过 header 使用该密钥，仅允许本项目 preview URL，不跟随重定向。
