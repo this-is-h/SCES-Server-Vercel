@@ -24,7 +24,7 @@
 | 备份恢复 | 通过（仅 PGlite 本地快照） | 恢复到独立实例，核对单位、模板、授权、审计、限流、迁移记录；**不是 Supabase/pg_dump 生产恢复演练** |
 | Vercel 配置与线上探针 | 已隔离配置、生产只读核对 | 三项 preview 凭据独立，生产原值不变；已有部署不会自动更新配置 |
 | 契约 GitHub CI / gitleaks | 通过并合并 develop | SCES-Server PR #3，合并 2bddcd0；契约构建、供应链、密钥扫描通过 |
-| 服务端 GitHub CI / preview | 待 PR 验证 | 不直接推送 main、不手动发布 develop 到生产 |
+| 服务端 GitHub CI / preview 构建 | 通过并合并 develop | PR #9，合并 6a7ba63；类型、契约、测试、构建、产物探针、供应链、gitleaks 均通过；preview 构建 READY 不代表实库连通 |
 
 本机运行 Node 24.19.0，Vercel 项目 Node 24.x；已修正 Nitro 自动探测上限导致产物错误声明 Node 22 的问题，显式产物和 CI 均使用 Node 24。构建存在上游弃用/注释告警，但退出码为 0；字体网络依赖已关闭。
 
@@ -111,9 +111,13 @@ check-built-api 强制连接关闭的回环端口验证故障行为，不会连�
 
 ## 剩余发布门禁
 
-- 服务端 PR 的 CI、gitleaks 与实际 preview HTTP 验收。
+- 实际 preview HTTP 验收（服务端 PR #9 的 CI、gitleaks 已通过）。
 - 使用兼容 PostgreSQL 工具取得生产备份并恢复到独立目标；再审核历史模板/keyId 映射与生产迁移。
 - 完成一级审核、班级最小权限、重试语义与校园限流的需求/实现闭环后再放行客户端生产接入。
 - release PR（develop → main）必须等待上述门禁；不能因本地或 staging 脚本通过而直接上线。
 
-契约 PR：https://github.com/this-is-h/SCES-Server/pull/3（已合并 develop）。服务端 PR 与新 preview 结果将在执行后追加。
+契约 PR：https://github.com/this-is-h/SCES-Server/pull/3（已合并 develop）。
+
+服务端 PR：https://github.com/this-is-h/SCES-Server-Vercel/pull/9（全绿后合并 develop，6a7ba63）。修复分支 preview 为 `sces-server-vercel-ko2qcy07a-this-is-hs-projects.vercel.app`，Node 24、hkg1、构建 READY。本机访问该域名连接超时，外部 HTTP 验收未通过，不能把部署成功等同于服务可用；补充 GitHub 只读部署探针以区分本机网络和部署故障。
+
+Vercel 访问保护已只读核实为 `all_except_custom_domains`，当前未配置自动化绕过密钥。不会为了验收关闭访问保护。受保护 preview 的外部验收需要项目所有者生成 Protection Bypass for Automation，并保存到本仓 Actions secret `VERCEL_AUTOMATION_BYPASS_SECRET`；不要发送到聊天或放在 workflow 输入中。`Preview HTTP acceptance` 手动工作流通过 header 使用该密钥，仅允许本项目 preview URL，不跟随重定向。

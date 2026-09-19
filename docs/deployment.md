@@ -45,15 +45,7 @@ Vercel 的 production 和 preview 必须分别配置不同数据库和签名密�
 
 ## Vercel 配置
 
-- **Git 集成**：`develop` → `main` 合并触发生产部署；PR 触发 preview 部署。也可手动触发：
-
-  ```sh
-  # scripts/vercel-cli.mjs 包装了 token（从 .env VERCEL_TOKEN 读）
-  # 或直接调 API：
-  POST https://api.vercel.com/v13/deployments
-  { "name": "sces-server-vercel", "target": "production",
-    "gitSource": { "type": "github", "org": "...", "repo": "SCES-Server-Vercel", "ref": "develop" } }
-  ```
+- **Git 集成**：修复分支 → develop 的 PR 用于 preview 验收；release PR（develop → main）合并才触发生产发布。
 
 - **当前发布约束**：Vercel production branch 为 main；代码更新通过 PR 合并触发 Git 部署，不使用 API 手动部署 develop 到生产。
 - `pnpm build` 生成本地 Node 产物；`pnpm build:vercel` 生成 `.vercel/output`。CI 在构建后执行 `pnpm check:built-api`。后台使用系统字体，不依赖 Google 字体服务。
