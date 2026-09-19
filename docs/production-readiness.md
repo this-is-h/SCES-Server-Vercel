@@ -1,8 +1,18 @@
 # 接入前检查记录
 
-检查日期：2026-09-19。范围：SCES-Server 权威契约、SCES-Server-Vercel 代码和构建、独立 Supabase staging 实库写入验收、Vercel 配置隔离与生产只读探针。
+检查日期：2026-09-19。范围：SCES-Server 权威契约、SCES-Server-Vercel 代码和构建、独立 Supabase staging 实库写入验收、生产结构迁移、Vercel API 发布及正式域名只读探针。
 
-**结论：本地验证及 staging 实库脚本通过，正式接入验收仍未通过。** preview 配置已与 production 隔离；真实 Vercel 部署验收、生产备份恢复及业务权限闭环尚待完成。不能据此宣称“满足所有生产需求”。
+**结论：加固版本已发布，staging 实库验收和正式域名基础探针通过；完整业务接入验收仍未通过。** preview 与 production 已隔离。本次生产备份经项目所有者明确豁免（系统尚未上线）；一级审核、班级权限和容量等问题仍未闭环，不能据此宣称“满足所有生产需求”。
+
+## 本次生产发布结果
+
+- 来源：已经 PR #9 / #10 合并的 develop 提交 `4ced1d4a614ebd9c01b5541bb1ebd34e5fe8ea04`。
+- 生产库执行 `0003_production_hardening.sql` 成功；迁移前 batch / apply_status 均为 0，重复活跃设备令牌组为 0。迁移后全部表启用 RLS，anon/authenticated 表权限为 0。
+- 按所有者确认跳过本次生产备份，没有向生产导入种子、测试账号、批次或申请数据。
+- 通过 Vercel API 从 preview 创建 production 构建，使用 production 环境变量。部署 `dpl_BxBzbejvaDMzMLqJV17xk944EWkK` 为 READY，并已绑定 `sces.thisish.cn`；不是把 preview 的 staging 变量带入生产。
+- 正式域名只读验收：`/api/v1/health` 200、`/api/v1/health/ready` 200、未登录 `/api/v1/admin/units` 401、不存在的接口 404、`/admin/login` 200。API 包络、no-store、X-Request-Id 和 nosniff 均验证通过。
+- 旧 production 部署 `dpl_8tw6cN2g6E1qRUfLH4pFxNeRoLjF` 保留为回退点，没有删除。脱敏本地发布凭据记录在 `.vercel/production-release.json`，不入库。
+- 本次是部署和基础可用性验证；写入、并发和种子验收仍只在 staging 执行，没有用生产域名做写入压力测试。
 
 ## 已实际执行
 
@@ -25,17 +35,20 @@
 | Vercel 配置与线上探针 | 已隔离配置、生产只读核对 | 三项 preview 凭据独立，生产原值不变；已有部署不会自动更新配置 |
 | 契约 GitHub CI / gitleaks | 通过并合并 develop | SCES-Server PR #3，合并 2bddcd0；契约构建、供应链、密钥扫描通过 |
 | 服务端 GitHub CI / preview 构建 | 通过并合并 develop | PR #9，合并 6a7ba63；类型、契约、测试、构建、产物探针、供应链、gitleaks 均通过；preview 构建 READY 不代表实库连通 |
+| 外部验收工作流 CI | 通过并合并 develop | PR #10，合并 4ced1d4；补充 3 项外部探针安全测试；其完整 CI 门禁通过 |
+| production 结构迁移与发布 | 通过 | 0003 已执行；API 发布指定 develop commit，READY 且为当前 production |
+| 正式域名 HTTP 验收 | 通过 | 5 项只读探针，readiness 200 证明实际 Vercel 运行时可访问生产 schema |
 
 本机运行 Node 24.19.0，Vercel 项目 Node 24.x；已修正 Nitro 自动探测上限导致产物错误声明 Node 22 的问题，显式产物和 CI 均使用 Node 24。构建存在上游弃用/注释告警，但退出码为 0；字体网络依赖已关闭。
 
-## 环境隔离与实库验收
+## 发布前历史检查与 staging 验收
 
-2026-09-19 通过 scripts/inspect-environment.mjs 核对：
+以下为发布前的历史状态，生产当前结果以上一节为准。2026-09-19 通过 scripts/inspect-environment.mjs 核对：
 
 - 项目 sces-server-vercel 存在 READY 的 production 和 preview 部署。
 - 初查 DATABASE_URL、TOKEN_SIGNING_SECRET、ADMIN_INITIAL_PASSWORD 共用 production/preview 记录；已拆分 target，preview 使用 staging 及随机生成的独立密钥、初始密码，回读确认生产原值未改变。
 - 用户提供的 STAGING_DATABASE_URL 已连接成功；按 Supabase 项目身份（同时识别直连/池化地址）核实与本地 DATABASE_URL、Vercel production 不同。新库初始 public schema 为空。
-- Vercel production branch 实测为 main。现有旧 preview 部署仍可能使用旧配置，不能作为隔离验收目标；必须验证新 Git 部署。
+- Vercel production Git branch 配置为 main，但所有者确认实际使用 develop PR → preview → Vercel API 提升的流程；不以合并 main 为本次发布条件。旧 preview 部署仍可能使用旧配置，不能作为隔离验收目标。
 - https://sces.thisish.cn/api/v1/health 返回 200。
 - https://sces.thisish.cn/api/v1/health/ready 返回 404。
 - https://sces.thisish.cn/admin/login 返回 200。
@@ -43,7 +56,7 @@
 - 本地 DATABASE_URL 指向的远程数据库只登记 0001_init.sql 和 0002_enable_rls.sql，11 张表启用 RLS，没有 batch.key_id、unit.config_template_id、rate_limit_bucket。
 - 本地 DATABASE_URL 与 Vercel production 按项目身份核实为同一项目；staging 是另一项目。当前配置为 Supabase 直连，仅有 IPv6 DNS，Vercel 运行时连通性尚须验收。
 
-生产数据库未执行迁移或写入，生产代码/别名未改变，也未取得生产备份。staging 已执行迁移、种子及验收写入；随机测试账号、单位、模板、批次、申请、会话及对应审计/限流记录已清理，三份标准种子保留。没有删除用户业务数据。
+在这一历史检查阶段，生产数据库尚未迁移、生产部署尚未改变。后续已按上一节完成 0003 和 API 发布。staging 已执行迁移、种子及验收写入；随机测试账号、单位、模板、批次、申请、会话及对应审计/限流记录已清理，三份标准种子保留。没有删除用户业务数据。
 
 最新通过的实库运行：2026-09-19 11:24:16–11:27:16 UTC，10 项检查全部通过，脱敏报告在本地 `.vercel/staging-acceptance.json`（不入库）。可通过 `pnpm check:staging` 重现；脚本验证隔离，遇到已有但未升级的 schema 拒绝自动迁移，需先备份。
 
@@ -78,10 +91,10 @@
 |---|---|---|
 | 一级审核权限流程 | assertLevelOne 检查 unitLevel=1；签发授权接口只接受 level=2；测试通过直接插入一级授权和模板来验证重审 | 明确“单位层级”与“审核角色”的关系，提供可通过正式接口取得权限的流程，取消依赖手工插库的验收方式 |
 | 班级端最小权限 | 单位令牌仅含 unitId/installId/licenseCode/unitLevel，无班级 scope；同单位凭证拥有整个单位写权限 | 明确班级端是否联网写入；若是，补齐班级授权、范围校验、撤销与越权测试，不能共享单位主令牌 |
-| 真实环境与容量 | preview 已隔离；500 条实库同步 7.525 秒；共享限流 30 次/分钟/路由/IP 已证实会阻挡同出口并发 | Vercel 新部署验收、截止峰值/校园 NAT 压测及限流策略调整，不能把行为测试通过当成容量通过 |
-| 历史数据升级 | 新列可空，历史 keyId 和模板绑定未必齐全 | 在 staging 统计缺失/错属记录，根据实际密钥映射修复；不能自动猜测 keyId |
+| 真实环境与容量 | preview 已隔离；生产 readiness 200；500 条 staging 同步 7.525 秒；共享限流 30 次/分钟/路由/IP 会阻挡同出口并发 | 截止峰值/校园 NAT 压测及限流策略调整，不能把基础探针或行为测试通过当成容量通过 |
+| 历史数据升级 | 生产迁移完成；当前无批次/申请记录、模板单位归属一致；模板绑定可空并由服务端回退查找 | 后续导入历史数据时核对真实 keyId 与模板绑定，不猜测或伪造密钥标识 |
 | 请求重试语义 | 续期、换机、重审不能仅靠 HTTP 重试证明恰好执行一次 | 验证响应丢失后的对账流程，定义幂等键或期望版本/轮次；客户端不得盲目重试不可幂等操作 |
-| 生产恢复 | 仅完成 PGlite 本地恢复；本机没有可用 pg_dump，Docker daemon 未运行 | 使用兼容 PostgreSQL 工具备份并恢复到隔离库，记录恢复时间、权限和关键行核对结果 |
+| 生产恢复 | 本次首次发布经所有者确认无需备份，未完成 PostgreSQL 生产恢复演练；不再阻塞本次发布 | 有真实业务数据后建立备份/恢复策略，不把本次豁免视为永久取消备份 |
 | 运维访问 | 单一管理员基本会话已验证，未实现角色划分/MFA/SSO/自助找回 | 按实际运维人数与访问边界确定是否需要；多操作员不得共用超管账号 |
 
 另外，列表分页、审计与业务写入的全面原子性、完整公钥强度校验、监控告警、统一机器错误码、限流入口防护和在线数据保留策略仍需按生产验收范围继续审查。本报告不是全量安全审计认证。
@@ -109,15 +122,15 @@ node scripts/inspect-environment.mjs
 
 check-built-api 强制连接关闭的回环端口验证故障行为，不会连生产库；构建产物扫描只检查本地已知密钥是否出现在公开文件，不替代完整 gitleaks 扫描。
 
-## 剩余发布门禁
+## 剩余业务接入事项
 
-- 实际 preview HTTP 验收（服务端 PR #9 的 CI、gitleaks 已通过）。
-- 使用兼容 PostgreSQL 工具取得生产备份并恢复到独立目标；再审核历史模板/keyId 映射与生产迁移。
+- 正式域名基础验收已通过；preview 访问保护不做降低，需要受保护 preview 自动化时再配置对应凭据。
+- 本次生产迁移和 API 发布已完成，备份按所有者对尚未上线系统的明确说明跳过。
 - 完成一级审核、班级最小权限、重试语义与校园限流的需求/实现闭环后再放行客户端生产接入。
-- release PR（develop → main）必须等待上述门禁；不能因本地或 staging 脚本通过而直接上线。
+- 后续继续通过 PR 合并 develop、生成 preview、Vercel API 提升 production；代码发布成功不等于上述业务缺口已经解决。
 
 契约 PR：https://github.com/this-is-h/SCES-Server/pull/3（已合并 develop）。
 
 服务端 PR：https://github.com/this-is-h/SCES-Server-Vercel/pull/9（全绿后合并 develop，6a7ba63）。修复分支 preview 为 `sces-server-vercel-ko2qcy07a-this-is-hs-projects.vercel.app`，Node 24、hkg1、构建 READY。本机访问该域名连接超时，外部 HTTP 验收未通过，不能把部署成功等同于服务可用；补充 GitHub 只读部署探针以区分本机网络和部署故障。
 
-Vercel 访问保护已只读核实为 `all_except_custom_domains`，当前未配置自动化绕过密钥。不会为了验收关闭访问保护。受保护 preview 的外部验收需要项目所有者生成 Protection Bypass for Automation，并保存到本仓 Actions secret `VERCEL_AUTOMATION_BYPASS_SECRET`；不要发送到聊天或放在 workflow 输入中。`Preview HTTP acceptance` 手动工作流通过 header 使用该密钥，仅允许本项目 preview URL，不跟随重定向。
+历史外部探针 https://github.com/this-is-h/SCES-Server-Vercel/actions/runs/35441663947 返回 4 个 302；Vercel 保护配置为 `all_except_custom_domains`，未关闭保护。随后按所有者指定的 API 发布流程，在正式域名完成了本报告顶部的只读验收，不再将 preview 自动化密钥作为本次发布前置条件。若后续需要受保护 preview 的自动化验收，可配置 Actions secret `VERCEL_AUTOMATION_BYPASS_SECRET`；不得发到聊天、workflow 输入或日志。
