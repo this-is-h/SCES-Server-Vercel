@@ -111,7 +111,7 @@ check-built-api 强制连接关闭的回环端口验证故障行为，不会连�
 
 ## 剩余发布门禁
 
-- 服务端 PR 的 CI、gitleaks 与实际 preview HTTP 验收。
+- 实际 preview HTTP 验收（服务端 PR #9 的 CI、gitleaks 已通过）。
 - 使用兼容 PostgreSQL 工具取得生产备份并恢复到独立目标；再审核历史模板/keyId 映射与生产迁移。
 - 完成一级审核、班级最小权限、重试语义与校园限流的需求/实现闭环后再放行客户端生产接入。
 - release PR（develop → main）必须等待上述门禁；不能因本地或 staging 脚本通过而直接上线。

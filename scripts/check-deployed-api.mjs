@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 export function previewUrl(value) {
   const url = new URL(value)
   if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash || url.pathname !== '/' ||
-      !/^sces-server-vercel-[a-z0-9-]+\.vercel\.app$/.test(url.hostname)) throw new Error('Only an SCES Vercel preview URL is allowed')
+      !/^sces-server-vercel-[a-z0-9-]+-this-is-hs-projects\.vercel\.app$/.test(url.hostname)) throw new Error('Only an SCES owner-scoped Vercel deployment URL is allowed')
   return url.origin
 }
 
