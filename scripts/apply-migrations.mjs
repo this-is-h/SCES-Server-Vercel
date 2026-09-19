@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
+import { applyMigrations } from './lib/migrations.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const migrationsDir = join(root, 'supabase', 'migrations')
@@ -36,35 +37,17 @@ async function main() {
     .filter((name) => name.endsWith('.sql'))
     .sort()
 
-  const sql = postgres(databaseUrl, { max: 1, prepare: false, connect_timeout: 15 })
+  const sql = postgres(databaseUrl, { max: 1, prepare: false, ssl: 'require', connect_timeout: 15,
+    connection: { statement_timeout: 60000, lock_timeout: 15000 } })
+  const wrap = (connection) => ({
+    query: (text, params = []) => connection.unsafe(text, params),
+    exec: (text) => connection.unsafe(text),
+    transaction: (fn) => connection.begin((tx) => fn(wrap(tx))),
+  })
 
   try {
-    // schema_migrations 是应用状态的权威记录：先确保表存在（与 0001 同 DDL），
-    // 再按已应用版本过滤 —— 重复执行不再重放 DDL（DDL 虽全部 IF NOT EXISTS 幂等，
-    // 但重放无谓消耗，且并非所有后续迁移都严格可重放，如 0002 的 RLS 回收权限）。
-    await sql.unsafe(`CREATE TABLE IF NOT EXISTS schema_migrations (
-        version    TEXT NOT NULL PRIMARY KEY,
-        applied_at INTEGER NOT NULL
-      )`)
-
-    const appliedRows = await sql`SELECT version FROM schema_migrations`
-    const applied = new Set(appliedRows.map((row) => row.version))
-
-    for (const name of files) {
-      if (applied.has(name)) {
-        console.log(`跳过 ${name}（已应用）`)
-        continue
-      }
-
-      const content = readFileSync(join(migrationsDir, name), 'utf8')
-      await sql.unsafe(content)
-      await sql`
-        INSERT INTO schema_migrations (version, applied_at)
-        VALUES (${name}, ${Date.now()})
-        ON CONFLICT (version) DO NOTHING
-      `
-      console.log(`已执行 ${name}`)
-    }
+    const result = await applyMigrations(wrap(sql), files.map((name) => ({ name, sql: readFileSync(join(migrationsDir, name), 'utf8') })))
+    for (const migration of result) console.log(`${migration.status}: ${migration.name}`)
 
     const [{ count }] = await sql`
       SELECT count(*)::int AS count

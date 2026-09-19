@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestDb, type TestDb } from './helpers/db.js'
 
-/** 契约 DDL（schema-web.sql）的 11 张表。 */
+/** 契约 DDL（schema-web.sql）的 12 张表。 */
 const CONTRACT_TABLES = [
   'admin_user',
   'apply_status',
@@ -11,6 +11,7 @@ const CONTRACT_TABLES = [
   'license',
   'rebind_request',
   'refresh_token',
+  'rate_limit_bucket',
   'schema_migrations',
   'unit',
   'unit_token',
@@ -30,7 +31,7 @@ describe('建库 DDL 镜像（supabase/migrations/0001_init.sql）', () => {
     await ctx.close()
   })
 
-  it('契约 11 张表齐备', async () => {
+  it('契约 12 张表齐备', async () => {
     const rows = await ctx.db.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
     )

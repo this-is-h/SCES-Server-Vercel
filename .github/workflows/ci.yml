@@ -36,7 +36,7 @@ jobs:
           version: 10.9.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       # 锁文件与 registry 无关；显式用公共源，保证 audit 端点可用
       # （本机/组织级 npmrc 若指到 npmmirror 等镜像则无 audit 端点）。
@@ -44,6 +44,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: 校验门禁（type-check + 契约镜像比对 + vitest）
         run: pnpm verify
+      - name: Vercel 生产构建
+        run: pnpm build:vercel
+      - name: 构建产物 HTTP 冒烟（仅本机回环地址）
+        run: pnpm check:built-api
 
   supply-chain-audit:
     name: 供应链安全检查（生产依赖）
@@ -55,7 +59,7 @@ jobs:
           version: 10.9.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: npm config set registry https://registry.npmjs.org/
       - run: pnpm install --frozen-lockfile

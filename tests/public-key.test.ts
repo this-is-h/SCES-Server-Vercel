@@ -121,6 +121,19 @@ describe('POST /api/v1/units/{unitId}/public-key', () => {
     expect(res.status).toBe(400)
   })
 
+  it('JWK 包含私钥字段 → 400，服务端不接收私钥', async () => {
+    const seeded = await seedTestUnit(ctx.db)
+    const app = createHonoApp({ db: ctx.db })
+    const token = await activateUnit(app, seeded.code)
+
+    const res = await app.request(publicKeyUrl(seeded.unitId), {
+      method: 'POST',
+      headers: unitHeaders(token, seeded.unitId),
+      body: JSON.stringify({ publicKeyJwk: { ...TEST_JWK, d: 'private-material' } }),
+    })
+    expect(res.status).toBe(400)
+  })
+
   it('授权码作废后上报 → 403 授权码已作废', async () => {
     const seeded = await seedTestUnit(ctx.db)
     const app = createHonoApp({ db: ctx.db })

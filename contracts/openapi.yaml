@@ -164,7 +164,7 @@ components:
       type: object
       required: [kty, n, e]
       properties:
-        kty: { type: string, examples: ['RSA'] }
+        kty: { const: RSA }
         n: { type: string }
         e: { type: string, examples: ['AQAB'] }
         alg: { type: string, examples: ['RSA-OAEP-256'] }
@@ -173,6 +173,16 @@ components:
           type: array
           items: { type: string }
       additionalProperties: true
+      not:
+        anyOf:
+          - required: [d]
+          - required: [p]
+          - required: [q]
+          - required: [dp]
+          - required: [dq]
+          - required: [qi]
+          - required: [oth]
+          - required: [k]
 
     BatchStatus:
       description: 批次状态（单向推进）。
@@ -186,12 +196,14 @@ components:
       description: 审核轮次，从 1 起递增（决策 #31）。
       type: integer
       minimum: 1
+      maximum: 32767
       examples: [1]
 
     Revision:
       description: 申请版本号，学生端每次导出 +1。
       type: integer
       minimum: 1
+      maximum: 32767
       examples: [3]
 
     UnitConfig:
@@ -258,7 +270,7 @@ components:
       description: 批次公开字段（不含私钥，决策 §3.2）。
       type: object
       required:
-        [batchId, unitId, year, semester, isTest, status, calcMode, calcConfig, publicKeyJwk]
+        [batchId, unitId, year, semester, isTest, status, calcMode, calcConfig, publicKeyJwk, keyId]
       properties:
         batchId: { $ref: '#/components/schemas/BatchId' }
         unitId: { $ref: '#/components/schemas/UnitId' }
@@ -276,6 +288,9 @@ components:
           enum: [weighted, formula]
         calcConfig: { $ref: '#/components/schemas/CalcConfig' }
         publicKeyJwk: { $ref: '#/components/schemas/Jwk' }
+        keyId:
+          description: 历史批次未登记密钥标识时为 null；新建批次必须显式提供。
+          oneOf: [{ type: string, minLength: 1, maxLength: 128 }, { type: 'null' }]
         configTemplateId: { type: string }
         configTemplateVersion: { type: integer, minimum: 1 }
         configTemplateRevision: { type: integer, minimum: 0 }
@@ -449,6 +464,14 @@ components:
           examples:
             default:
               value: { ok: false, error: '服务端异常，请稍后重试' }
+    ServiceUnavailable:
+      description: 服务暂不可用
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+          examples:
+            default:
+              value: { ok: false, error: '服务暂不可用，请稍后重试' }
 
 paths:
   /api/v1/health:
@@ -485,6 +508,34 @@ paths:
                     ok: true
                     data: { status: ok, now: 1755500000000, architecture: web }
         '500': { $ref: '#/components/responses/ServerError' }
+
+  /api/v1/health/ready:
+    get:
+      tags: [健康检查]
+      summary: 数据库就绪检查
+      description: 检查服务端是否能够访问数据库。数据库不可用时返回 503。
+      operationId: healthReady
+      security: []
+      responses:
+        '200':
+          description: 数据库可用
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { const: true }
+                  data:
+                    type: object
+                    required: [status, now]
+                    properties:
+                      status: { const: ready }
+                      now: { $ref: '#/components/schemas/EpochMs' }
+                    additionalProperties: false
+                additionalProperties: false
+        '500': { $ref: '#/components/responses/ServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   # ------------------------------------------------------------------ 1. 授权
 
@@ -751,6 +802,7 @@ paths:
                       calcMode,
                       calcConfig,
                       publicKeyJwk,
+                      keyId,
                       configTemplateId,
                       configTemplateVersion,
                       configTemplateRevision,
@@ -767,6 +819,7 @@ paths:
                     calcMode: { enum: [weighted, formula] }
                     calcConfig: { $ref: '#/components/schemas/CalcConfig' }
                     publicKeyJwk: { $ref: '#/components/schemas/Jwk' }
+                    keyId: { type: string, minLength: 1, maxLength: 128 }
                     configTemplateId: { type: string }
                     configTemplateVersion: { type: integer, minimum: 1 }
                     configTemplateRevision: { type: integer, minimum: 0 }
@@ -933,15 +986,26 @@ paths:
                       results:
                         type: array
                         items:
-                          allOf:
-                            - $ref: '#/components/schemas/ApplyStatusRecord'
-                            - type: object
-                              required: [ok]
-                              properties:
-                                ok: { type: boolean }
-                                error:
-                                  description: 失败时的中文原因。
-                                  oneOf: [{ type: string }, { type: 'null' }]
+                          type: object
+                          required: [applyId, ok, error, reviewRound, status, latestRevision, importedRevision, importedAt, updatedAt]
+                          properties:
+                            applyId: { $ref: '#/components/schemas/ApplyId' }
+                            ok: { type: boolean }
+                            error: { type: [string, 'null'] }
+                            reviewRound:
+                              description: 无权访问或不存在的申请为 0，不泄露原记录轮次。
+                              type: integer
+                              minimum: 0
+                              maximum: 32767
+                            status: { $ref: '#/components/schemas/ApplyStatus' }
+                            latestRevision:
+                              oneOf: [{ $ref: '#/components/schemas/Revision' }, { type: 'null' }]
+                            importedRevision:
+                              oneOf: [{ $ref: '#/components/schemas/Revision' }, { type: 'null' }]
+                            importedAt:
+                              oneOf: [{ $ref: '#/components/schemas/EpochMs' }, { type: 'null' }]
+                            updatedAt: { $ref: '#/components/schemas/EpochMs' }
+                          additionalProperties: false
                     additionalProperties: false
                 additionalProperties: false
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1352,7 +1416,7 @@ paths:
       description: |
         服务商运维登录。返回 15 分钟访问 token 与可删除的刷新 token（决策 #40）。
         首次启动时若 `admin_user` 为空且配置了 `ADMIN_INITIAL_PASSWORD`，自动创建初始管理员，
-        `mustChangePassword` 为 true 时前端强制跳转改密。登录走严格限流。
+        `mustChangePassword` 为 true 时前端跳转改密，服务端拒绝其他管理业务操作（403）。登录走严格限流。
       operationId: adminLogin
       security: []
       requestBody:
@@ -1408,8 +1472,8 @@ paths:
       tags: [后台认证]
       summary: 刷新访问令牌（接口 15）
       description: |
-        用刷新 token 换取新的访问 token（决策 #40）。刷新 token 存库，登出即删除；
-        已删除或已过期的刷新 token 返回 401。
+        用刷新 token 换取新的访问 token（决策 #40）。刷新 token 采用一次性轮换，
+        成功后旧 token 立即失效；已删除、已使用或已过期的刷新 token 返回 401。
       operationId: adminRefresh
       security: []
       requestBody:
@@ -1434,10 +1498,11 @@ paths:
                   ok: { const: true }
                   data:
                     type: object
-                    required: [accessToken, accessTokenExpiresAt]
+                    required: [accessToken, accessTokenExpiresAt, refreshToken]
                     properties:
                       accessToken: { type: string, minLength: 16 }
                       accessTokenExpiresAt: { $ref: '#/components/schemas/EpochMs' }
+                      refreshToken: { type: string, minLength: 32 }
                     additionalProperties: false
                 additionalProperties: false
         '400': { $ref: '#/components/responses/BadRequest' }

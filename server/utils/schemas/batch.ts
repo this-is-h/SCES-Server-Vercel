@@ -26,6 +26,7 @@ const commonBatchFields = {
   isTest: z.boolean(),
   applyStartAt: epoch.nullable().optional(),
   applyEndAt: epoch.nullable().optional(),
+  keyId: z.string().min(1).max(128),
   publicKeyJwk: publicKeyJwkSchema,
   configTemplateId: z.string().min(1),
   configTemplateVersion: z.number().int().min(1),
@@ -39,6 +40,12 @@ const commonBatchFields = {
 export const batchPayloadSchema = z.discriminatedUnion('calcMode', [
   z.strictObject({ ...commonBatchFields, calcMode: z.literal('weighted'), calcConfig: weightedCalcConfig }),
   z.strictObject({ ...commonBatchFields, calcMode: z.literal('formula'), calcConfig: formulaCalcConfig }),
-])
+]).superRefine((batch, ctx) => {
+  if (batch.applyStartAt !== null && batch.applyStartAt !== undefined &&
+      batch.applyEndAt !== null && batch.applyEndAt !== undefined &&
+      batch.applyStartAt >= batch.applyEndAt) {
+    ctx.addIssue({ code: 'custom', path: ['applyEndAt'], message: '申请截止时间必须晚于开始时间' })
+  }
+})
 
 export const batchStatusSchema = z.enum(['draft', 'active', 'closed'])

@@ -47,8 +47,8 @@ function buildApiDoc(contractMd) {
 |----|--------------|---------------|
 | 服务地址 | http://127.0.0.1:3100（server/web）/ 8787（cloudflare） | 本地 \`http://localhost:3000\`；生产 \`https://sces.thisish.cn\` |
 | 架构标识 | \`architecture\` 返回 \`web\` / \`cloudflare\` | 健康检查固定返回 \`web\`（\`server/utils/constants.ts\`） |
-| 限流实现 | 平台差异，契约不断言 | 内存固定窗口 60s/30 次，键 (path, IP)：\`POST /authorize\`、\`POST /admin/auth/login\`、\`POST /applies/:id/register\`、\`GET /applies/:id\`（\`server/utils/app.ts\`） |
-| 令牌签发 | — | accessToken HS256 15 分钟（\`ACCESS_TOKEN_TTL_MS\`）；refreshToken 30 天仅存哈希 |
+| 限流实现 | 平台差异 | PostgreSQL 共享固定窗口 60s/30 次；按 method、路由模板、IP 的 SHA-256 计数，含 authorize/login/refresh/rebind/register/query |
+| 令牌签发 | — | accessToken HS256 15 分钟、JWT exp 为秒；refreshToken 30 天绝对有效期、一次性轮换、仅存哈希 |
 
 ${index}${details}`
 }

@@ -9,86 +9,61 @@ import { UNIT_ID_PATTERN } from '../lib/hash.js'
 import { publicKeyJwkSchema } from '../lib/jwk.js'
 import { monthKey } from '../lib/time.js'
 import { countRebindsInMonth, insertRebind } from '../repos/rebinds.js'
-import { findLicenseByCode, issueLicense, revokeLicense } from '../repos/licenses.js'
+import { findLicenseByCode, issueLicense, revokeLicense, type LicenseRow } from '../repos/licenses.js'
 import { revokeActiveTokensForLicense } from '../repos/unit-tokens.js'
 import { findUnitById, updateUnitPublicKey } from '../repos/units.js'
 
 /** 接口 2/3：公钥上报与自助换机（unitToken）。 */
 export const unitsRouter = new Hono<AppEnv>()
 
+// Transactional rebind implementation. The unit row lock serializes monthly
+// quota checks across concurrent Vercel invocations.
 unitsRouter.post('/units/rebind', requireUnitToken, async (c) => {
   const auth = c.get('unitAuth')
   assertUnitIdentity(c, auth)
   const body = await readOptionalJsonObject(c)
-  const reason = optionalString(body, 'reason') ?? null
+  const reason = optionalString(body, 'reason')?.slice(0, 200) ?? null
   const db = c.get('db')
-
-  const license = await findLicenseByCode(db, auth.licenseCode)
-  if (license === undefined) throw unauthorized()
-  assertLicenseUsable(license)
-
-  const unit = await findUnitById(db, auth.unitId)
-  if (unit === undefined) throw notFound()
-  if (unit.status !== 'active') throw forbidden('授权已失效，请重新激活')
-
   const at = Date.now()
   const key = monthKey(at)
-  const used = await countRebindsInMonth(db, auth.unitId, key)
-  if (used >= REBIND_MONTHLY_LIMIT) {
-    // 超频：留 pending 记录待后台放行，本次不换机
-    await insertRebind(db, {
-      id: randomUUID(),
-      unitId: auth.unitId,
-      installId: auth.installId,
-      reason,
-      oldCode: license.code,
-      newCode: null,
-      status: 'pending',
-      monthKey: key,
-      monthCount: used + 1,
-      resolvedAt: null,
-    })
-    await recordAudit(db, {
-      action: 'rebind-pending',
-      target: auth.unitId,
-      detail: '本月换机次数超限，转后台放行',
-      ip: clientIp(c) ?? null,
-    })
-    throw forbidden('本月更换设备次数已达上限，请联系服务商')
-  }
 
-  const newCode = await db.transaction(async (tx) => {
-    // 先作废旧码再签发新码：uq_license_active_unit 只约束未作废行，反序会因同一单位
-    // 并存两条未作废授权码而违反部分唯一索引。
+  const result = await db.transaction(async (tx) => {
+    await tx.query(`SELECT id FROM unit WHERE id = $1 FOR UPDATE`, [auth.unitId])
+    const license = (await tx.query<LicenseRow>('SELECT * FROM license WHERE code = $1 FOR UPDATE', [auth.licenseCode]))[0]
+    if (license === undefined) throw unauthorized()
+    assertLicenseUsable(license)
+    const unit = await findUnitById(tx, auth.unitId)
+    if (unit === undefined) throw notFound()
+    if (unit.status !== 'active') throw forbidden('授权已失效，请重新激活')
+
+    const used = await countRebindsInMonth(tx, auth.unitId, key)
+    if (used >= REBIND_MONTHLY_LIMIT) {
+      await insertRebind(tx, {
+        id: randomUUID(), unitId: auth.unitId, installId: auth.installId, reason,
+        oldCode: license.code, newCode: null, status: 'pending', monthKey: key,
+        monthCount: used + 1, resolvedAt: null,
+      })
+      await recordAudit(tx, { action: 'rebind-pending', target: auth.unitId, detail: '本月换机次数超限', ip: clientIp(c) ?? null })
+      return { pending: true as const, monthCount: used + 1, oldCode: license.code }
+    }
+
     await revokeLicense(tx, license.code)
     await revokeActiveTokensForLicense(tx, license.code)
     const code = await issueLicense(tx, auth.unitId, license.expires_at)
     await insertRebind(tx, {
-      id: randomUUID(),
-      unitId: auth.unitId,
-      installId: auth.installId,
-      reason,
-      oldCode: license.code,
-      newCode: code,
-      status: 'self-served',
-      monthKey: key,
-      monthCount: used + 1,
-      resolvedAt: at,
+      id: randomUUID(), unitId: auth.unitId, installId: auth.installId, reason,
+      oldCode: license.code, newCode: code, status: 'self-served', monthKey: key,
+      monthCount: used + 1, resolvedAt: at,
     })
-    return code
+    await recordAudit(tx, { action: 'rebind-self-served', target: auth.unitId, detail: '自助换机完成', ip: clientIp(c) ?? null })
+    return { pending: false as const, code, expiresAt: license.expires_at, monthCount: used + 1, oldCode: license.code }
   })
 
-  await recordAudit(db, {
-    action: 'rebind-self-served',
-    target: auth.unitId,
-    detail: `旧授权码 ${license.code} → ${newCode}`,
-    ip: clientIp(c) ?? null,
-  })
+  if (result.pending) {
+    throw forbidden('本月更换设备次数已达上限，请联系服务商')
+  }
 
-  return c.json({
-    ok: true as const,
-    data: { ok: true as const, code: newCode, expiresAt: license.expires_at, monthCount: used + 1 },
-  })
+  return c.json({ ok: true as const, data: { ok: true as const, code: result.code, expiresAt: result.expiresAt, monthCount: result.monthCount } })
 })
 
 unitsRouter.post('/units/:unitId/public-key', requireUnitToken, async (c) => {

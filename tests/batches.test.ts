@@ -25,6 +25,7 @@ const createPayload = (overrides: Record<string, unknown> = {}) => ({
   calcMode: 'weighted',
   calcConfig: { calcMode: 'weighted', dyfWeight: 0.3, courseWeight: 0.7 },
   publicKeyJwk: { kty: 'RSA', n: 'batch-modulus', e: 'AQAB' },
+  keyId: 'testTest1-k1',
   configTemplateId: 'test-1',
   configTemplateVersion: 1,
   configTemplateRevision: 0,

@@ -35,7 +35,10 @@ export function getDb(): Db {
       max: 1,
       prepare: false,
       idle_timeout: 20,
+      connect_timeout: 15,
+      max_lifetime: 60 * 30,
       ssl: 'require',
+      connection: { statement_timeout: 15000, lock_timeout: 5000 },
       // 契约 EpochMs 为 number；postgres.js 默认把 BIGINT 序列化为 string，此处转回 number
       // （epoch ms ≈ 1.8e12，远在 Number.MAX_SAFE_INTEGER 内）。测试用 PGlite 本身返回 number，
       // 两驱动行为在此对齐。

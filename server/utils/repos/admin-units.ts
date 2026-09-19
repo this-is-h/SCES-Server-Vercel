@@ -2,6 +2,8 @@ import type { Db } from '../db/types.js'
 import type { ConfigTemplateRow, UnitConfig } from './config-templates.js'
 import type { LicenseRow } from './licenses.js'
 import type { UnitRow } from './units.js'
+import { findPublishedTemplate } from './config-templates.js'
+import { conflict } from '../lib/errors.js'
 
 /** 契约 UnitSummary（后台列表）。 */
 export function toUnitSummaryRow(unit: UnitRow): {
@@ -46,20 +48,15 @@ export async function listLicensesForUnit(db: Db, unitId: string): Promise<Licen
 
 /** 接口 18 单位详情：绑定的配置模板（该单位下的最新 published 行）。 */
 export async function findLatestTemplateForUnit(db: Db, unitId: string): Promise<ConfigTemplateRow | undefined> {
-  const rows = await db.query<ConfigTemplateRow>(
-    `SELECT * FROM config_template WHERE unit_id = $1 AND status = 'published'
-     ORDER BY version DESC, revision DESC LIMIT 1`,
-    [unitId],
-  )
-  return rows[0]
+  return findPublishedTemplate(db, unitId)
 }
 
-export async function insertUnit(db: Db, input: { id: string; name: string; unitType: string; parentId: string | null; level: number }): Promise<void> {
+export async function insertUnit(db: Db, input: { id: string; name: string; unitType: string; parentId: string | null; level: number; configTemplateId?: string | null }): Promise<void> {
   const at = Date.now()
   await db.query(
-    `INSERT INTO unit (id, name, unit_type, parent_id, level, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'active', $6, $6)`,
-    [input.id, input.name, input.unitType, input.parentId, input.level, at],
+    `INSERT INTO unit (id, name, unit_type, parent_id, level, config_template_id, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $7)`,
+    [input.id, input.name, input.unitType, input.parentId, input.level, input.configTemplateId ?? null, at],
   )
 }
 
@@ -90,12 +87,7 @@ export function toTemplateVersion(row: ConfigTemplateRow): TemplateVersionSummar
 /** 接口 20 列表：每个模板 id 的最新版本行（含 draft）。 */
 export async function listLatestTemplateVersions(db: Db): Promise<ConfigTemplateRow[]> {
   return db.query<ConfigTemplateRow>(
-    `SELECT t.* FROM config_template t
-     JOIN (
-       SELECT id, MAX(version * 1000 + revision) AS top FROM config_template GROUP BY id
-     ) latest ON latest.id = t.id
-          AND latest.top = t.version * 1000 + t.revision
-     ORDER BY t.id`,
+    `SELECT DISTINCT ON (id) * FROM config_template ORDER BY id, version DESC, revision DESC`,
   )
 }
 
@@ -109,11 +101,18 @@ export async function listTemplateVersions(db: Db, templateId: string): Promise<
 
 export async function insertTemplateFromConfig(db: Db, config: UnitConfig, unitId: string): Promise<void> {
   const at = Date.now()
-  await db.query(
+  const rows = await db.query<{ id: string }>(
     `INSERT INTO config_template
        (id, unit_id, name, version, revision, status, schema_version,
         unit_json, class_json, student_json, dyf_json, calc_json, rank_json, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
+     VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13, $13)
+     ON CONFLICT (id, version, revision) DO UPDATE SET
+       name = EXCLUDED.name, schema_version = EXCLUDED.schema_version,
+       unit_json = EXCLUDED.unit_json, class_json = EXCLUDED.class_json,
+       student_json = EXCLUDED.student_json, dyf_json = EXCLUDED.dyf_json,
+       calc_json = EXCLUDED.calc_json, rank_json = EXCLUDED.rank_json, updated_at = EXCLUDED.updated_at
+     WHERE config_template.status = 'draft' AND config_template.unit_id = EXCLUDED.unit_id
+     RETURNING id`,
     [
       config.id,
       unitId,
@@ -130,16 +129,21 @@ export async function insertTemplateFromConfig(db: Db, config: UnitConfig, unitI
       at,
     ],
   )
+  if (rows.length === 0) throw conflict('该版本已发布，请升修订号后再上传')
 }
 
 /** 接口 20 发布：目标置 published、同 id 其他 published 转 archived（唯一部分索引约束）。 */
 export async function publishTemplateVersion(db: Db, templateId: string, version: number, revision: number): Promise<void> {
   const at = Date.now()
-  await db.query(`UPDATE config_template SET status = 'archived', updated_at = $2 WHERE id = $1 AND status = 'published'`, [templateId, at])
-  const result = await db.query(
-    `UPDATE config_template SET status = 'published', updated_at = $4
-     WHERE id = $1 AND version = $2 AND revision = $3 AND status = 'draft'`,
-    [templateId, version, revision, at],
-  )
-  void result
+  await db.transaction(async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`template:${templateId}`])
+    await tx.query(`UPDATE config_template SET status = 'archived', updated_at = $2 WHERE id = $1 AND status = 'published'`, [templateId, at])
+    const result = await tx.query<{ id: string }>(
+      `UPDATE config_template SET status = 'published', updated_at = $4
+       WHERE id = $1 AND version = $2 AND revision = $3 AND status = 'draft'
+       RETURNING id`,
+      [templateId, version, revision, at],
+    )
+    if (result.length === 0) throw conflict('模板版本状态已改变')
+  })
 }

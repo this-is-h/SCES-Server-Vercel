@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { randomUUID } from 'node:crypto'
 import { lazyDb } from './db/client.js'
 import type { Db } from './db/types.js'
 import type { AppEnv } from './http/env.js'
@@ -22,12 +23,40 @@ export interface AppDeps {
 
 /**
  * 应用工厂：统一失败包裹 `{ ok: false, error: "中文描述" }`（契约：错误文案面向最终用户）。
- * 限流计数等有状态中间件在工厂内创建——每个应用实例独立计数，测试与部署互不串扰。
+ * 限流计数持久化在 PostgreSQL；Hono 工厂只负责组装中间件，便于测试注入数据库。
  */
 export function createHonoApp(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>()
 
   app.use('*', async (c, next) => {
+    c.header('X-Request-Id', randomUUID())
+    c.header('X-Content-Type-Options', 'nosniff')
+    c.header('X-Frame-Options', 'DENY')
+    c.header('Referrer-Policy', 'no-referrer')
+    c.header('Cache-Control', 'no-store')
+    c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+    c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    if (c.req.url.startsWith('https://')) {
+      c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    }
+    const origin = c.req.header('origin')
+    const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+    if (origin !== undefined && allowedOrigins.includes(origin)) {
+      c.header('Access-Control-Allow-Origin', origin)
+      c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Unit-Id, X-Install-Id')
+      c.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+      c.header('Access-Control-Expose-Headers', 'X-Request-Id, Retry-After')
+      c.header('Vary', 'Origin')
+    }
+    if (c.req.method === 'OPTIONS') return c.body(null, 204)
+    const contentLength = c.req.header('content-length')
+    if (contentLength !== undefined) {
+      const length = Number(contentLength)
+      if (!Number.isSafeInteger(length) || length < 0 || length > 5 * 1024 * 1024) throw new ApiError(413, '请求体过大')
+    }
     c.set('db', deps.db)
     await next()
   })
@@ -36,6 +65,8 @@ export function createHonoApp(deps: AppDeps): Hono<AppEnv> {
   const strictLimiter = createRateLimiter(STRICT_RATE_LIMIT)
   app.on('POST', '/api/v1/authorize', strictLimiter)
   app.on('POST', '/api/v1/admin/auth/login', strictLimiter)
+  app.on('POST', '/api/v1/admin/auth/refresh', strictLimiter)
+  app.on('POST', '/api/v1/units/rebind', strictLimiter)
   app.on('POST', '/api/v1/applies/:applyId/register', strictLimiter)
   app.on('GET', '/api/v1/applies/:applyId', strictLimiter)
 

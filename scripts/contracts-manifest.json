@@ -1,11 +1,11 @@
 {
-  "contracts/openapi.yaml": "7caf93b5e509be2b4a9cb3f91908068cab999aecf8a74398e536fd9b9a1a6550",
+  "contracts/openapi.yaml": "57e77356480f689e5073b4df8704000688e154418efdbff997e1b6da86372419",
   "contracts/unit-config.schema.json": "15dc5ba27493d80a7e2a2fb8fa34e8bb37a7405c7ab0749b4273f483a1bd82f0",
-  "contracts/schema-web.sql": "f1de8f710e538439bf970dee88dcf8fbf30e82f1deeead77422aedbb64801c5d",
-  "contracts/schema-d1.sql": "716243ad98722445ebcccf6fa3127e37943eda85ad78db951411559def6f303d",
+  "contracts/schema-web.sql": "cbbc802a525e4873c31e0be323b7b67dc2988318b0b2b257763784102efd0997",
+  "contracts/schema-d1.sql": "84b7b4ad94e7e5c2b623463ad685722bcdd3523ef2c348878e22207cfc1f7f6e",
   "contracts/seed/lixing-shuyuan.json": "63bf60c66ca5afcf9ecdd5cab71108c7c71c7b152707f0c583cded3c23ef8d5d",
   "contracts/seed/test-1.json": "e82c29c4895a7a4b2e00bbf7de39f42217c04c325786260d5406b1cf59601574",
   "contracts/seed/test-2.json": "8e898c88552646cf4084564bc462f5960819f5ba0ab50d0015a1f2c0eb4c7652",
   "server/utils/schemas/unit-config.schema.json": "15dc5ba27493d80a7e2a2fb8fa34e8bb37a7405c7ab0749b4273f483a1bd82f0",
-  "supabase/migrations/0001_init.sql": "f1de8f710e538439bf970dee88dcf8fbf30e82f1deeead77422aedbb64801c5d"
+  "supabase/migrations/0001_init.sql": "cbbc802a525e4873c31e0be323b7b67dc2988318b0b2b257763784102efd0997"
 }

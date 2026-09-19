@@ -42,14 +42,20 @@ export function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  const parts = stored.split('$')
-  if (parts.length !== 6 || parts[0] !== 'scrypt') return false
-  const N = Number.parseInt(parts[1] ?? '', 10)
-  const r = Number.parseInt(parts[2] ?? '', 10)
-  const p = Number.parseInt(parts[3] ?? '', 10)
-  if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) return false
-  const salt = Buffer.from(parts[4] ?? '', 'base64')
-  const expected = Buffer.from(parts[5] ?? '', 'base64')
-  const derived = scryptSync(password, salt, expected.length, { N, r, p })
-  return derived.length === expected.length && timingSafeEqual(derived, expected)
+  try {
+    const parts = stored.split('$')
+    if (parts.length !== 6 || parts[0] !== 'scrypt') return false
+    const N = Number.parseInt(parts[1] ?? '', 10)
+    const r = Number.parseInt(parts[2] ?? '', 10)
+    const p = Number.parseInt(parts[3] ?? '', 10)
+    if (!Number.isSafeInteger(N) || !Number.isSafeInteger(r) || !Number.isSafeInteger(p)) return false
+    if (N < 8_192 || N > 262_144 || (N & (N - 1)) !== 0 || r < 1 || r > 32 || p < 1 || p > 8) return false
+    const salt = Buffer.from(parts[4] ?? '', 'base64')
+    const expected = Buffer.from(parts[5] ?? '', 'base64')
+    if (salt.length < 8 || expected.length !== 64) return false
+    const derived = scryptSync(password, salt, expected.length, { N, r, p })
+    return derived.length === expected.length && timingSafeEqual(derived, expected)
+  } catch {
+    return false
+  }
 }

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { APPLY_ID_PATTERN, UUID_PATTERN } from '../lib/hash.js'
 
 export const applyStatusSchema = z.enum(['draft', 'submitted', 'imported', 'reviewing', 'confirmed'])
-export const revisionSchema = z.number().int().min(1)
+export const revisionSchema = z.number().int().min(1).max(32767)
 const applyIdSchema = z.string().regex(APPLY_ID_PATTERN)
 
 /** 学生端注册（接口 12）。 */
