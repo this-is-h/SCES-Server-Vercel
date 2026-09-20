@@ -1,6 +1,6 @@
 # 部署与运维
 
-> 生产形态：Vercel（Nuxt Node runtime，git 集成自动部署）+ Supabase Postgres（Supavisor 事务池）。域名 `sces.thisish.cn`。
+> 生产形态：Vercel（Nuxt Node runtime，Git 构建 + API 提升）+ Supabase Postgres。域名 `sces.thisish.cn`。
 
 ## 目录
 
@@ -39,15 +39,15 @@ Vercel 的 production 和 preview 必须分别配置不同数据库和签名密�
 
 连接串取法：Project Settings → Database → Connection string → **Transaction pooler**。
 
-- 必须用**事务池**（6543）而非会话池（5432）——serverless 每实例连接少且短命；
+- serverless 推荐**事务池**（6543），减少直接占用数据库连接；直连（5432）须验证网络可达性和连接数预算。2026-09-19 正式域名 readiness 已验证当前直连可达，但不等于连接容量验收；
 - 客户端已配置 `prepare: false`（事务池不支持预处理语句，`db/client.ts` 已设）+ `max: 1`（每实例一连接，池侧复用）+ `ssl: require`；
 - 迁移 runner 在同一事务中获取 `pg_advisory_xact_lock`，执行 DDL 并登记版本；可用于事务池。禁止使用会话级 advisory lock；失败回滚后可重试。
 
 ## Vercel 配置
 
-- **Git 集成**：修复分支 → develop 的 PR 用于 preview 验收；release PR（develop → main）合并才触发生产发布。
-
-- **当前发布约束**：Vercel production branch 为 main；代码更新通过 PR 合并触发 Git 部署，不使用 API 手动部署 develop 到生产。
+- **当前发布流程（项目所有者确认）**：代码通过 PR 合并到 develop，Git 集成生成 preview；检查通过后，使用本地 `.env` 的 `VERCEL_TOKEN` 调用 Vercel API 提升至 production，正式域名 `sces.thisish.cn` 才切到新版本。无需为了该流程额外合并 main；不得直接推送代码绕过 PR。
+- **preview → production**：当前 Vercel CLI 的 promote 路径调用 `POST /v13/deployments?teamId=<teamId>`，请求体为 `{ "deploymentId": "<已核实的 preview id>", "name": "sces-server-vercel", "target": "production", "meta": { "action": "promote" } }`。这会使用 production 环境变量重新构建，不会将 staging 凭据原样带入生产。token 仅放在 Authorization header，不写入仓库或日志。
+- **已有 production 构建提升**：才使用 `POST /v10/projects/<projectId>/promote/<deploymentId>`；两类操作不能混为一谈。调用前核实项目、源 commit、CI、数据库身份和迁移；调用后核实 READY、生产指向及正式域名 HTTP 响应。请求超时先查部署状态，不能盲目重复创建。
 - `pnpm build` 生成本地 Node 产物；`pnpm build:vercel` 生成 `.vercel/output`。CI 在构建后执行 `pnpm check:built-api`。后台使用系统字体，不依赖 Google 字体服务。
 
 ## 日常发布流程
@@ -55,10 +55,10 @@ Vercel 的 production 和 preview 必须分别配置不同数据库和签名密�
 ```
 1. develop 上 feature/* 合并 → pnpm verify 全绿
 2. 若涉及契约/DDL：契约 PR → pnpm sync:contracts → 独立 staging 迁移与实库验收
-   （生产迁移前取得备份并完成恢复演练；显式核对目标，新代码上线前结构必须就位）
-3. CI 和发布门禁通过后，release PR：develop → main；不直接推送 main
+   （先核对目标；有真实业务数据时评估备份/恢复；新代码上线前结构必须就位）
+3. 记录旧 production 部署作为回退点；用 Vercel API 将已验收的 develop preview 按生产配置重新构建并发布
 4. 部署后冒烟：GET /api/v1/health + /api/v1/health/ready + /admin/login 可达；在独立 staging 执行写流程
-5. 回滚：Vercel 控制台 Promote 上一个 READY 部署（秒级）；数据库回滚需手动（迁移幂等但无 down）
+5. 回滚：Vercel 的 Rollback 功能回到已记录的旧生产部署；先确认代码与当前 schema 向后兼容。数据库没有自动 down，不应通过删除新列回退
 ```
 
 ## 种子导入
@@ -91,6 +91,8 @@ SEED_LICENSE_NXU_LX=XXXX-XXXX-XXXX-XXXX node scripts/import-seeds.mjs lixing-shu
 ### 数据备份
 
 备份能力取决于 Supabase 项目套餐，需在项目控制台核实。使用与服务端版本兼容的 PostgreSQL 客户端，经直连或会话池执行 `pg_dump -Fc`，将备份恢复到独立测试库并核对表、索引、权限、数据和迁移记录。`pg_dump` 没有 `--no-prepared-statements` 参数。本地 PGlite 快照恢复测试不等于生产备份恢复演练。
+
+2026-09-19 首次发布例外：项目所有者明确确认尚未上线、无需备份；本次按授权跳过备份，仅对生产执行 0003 迁移和只读探针，测试数据仅用于 staging。此例外不自动适用于未来已有真实业务数据的变更。
 
 ### 审计追溯
 
